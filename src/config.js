@@ -157,11 +157,7 @@ export const CONFIG = {
       /** @type {number} Color of the ghost cue ball outline */
       ghostColor: 0xffffff,
       /** @type {number} Opacity of the ghost cue ball outline */
-      ghostAlpha: 0.4,
-      /** @type {number} Color of the target deflection path line */
-      targetDeflectColor: 0x4caf50,
-      /** @type {number} Color of the cue deflection path line */
-      cueDeflectColor: 0xffeb3b
+      ghostAlpha: 0.4
     },
 
     pockets: {
@@ -191,9 +187,9 @@ export const CONFIG = {
       { x: 312, y: 238 },
       { x: 312, y: 338 },
       { x: 312, y: 438 },
-      { x: 512, y: 238 },
+      { x: 512, y: 270 },
       { x: 512, y: 338 },
-      { x: 512, y: 438 },
+      { x: 512, y: 406 },
       { x: 712, y: 238 },
       { x: 712, y: 338 },
       { x: 712, y: 438 }

@@ -562,7 +562,7 @@ export class CanvasRenderer {
     const infiniteLaserAlpha = isLocked ? 0.9 : 0.3;
 
     if (aimData.hasHit && aimData.ghostCenter) {
-      const { ghostCenter, targetCenter, targetDeflect, cueDeflect } = aimData;
+      const { ghostCenter } = aimData;
 
       // 1. Draw dashed line from cue ball center to the ghost ball position
       this.drawDashedLine(
@@ -578,28 +578,6 @@ export class CanvasRenderer {
         width: 1.5,
         alpha: isLocked ? 0.9 : visuals.ghostAlpha
       });
-
-      // 3. Draw dashed line for target ball projected deflection direction (starting from target ball center)
-      if (targetDeflect && targetCenter) {
-        const targetEndX = targetCenter.x + targetDeflect.x * 120;
-        const targetEndY = targetCenter.y + targetDeflect.y * 120;
-        this.drawDashedLine(
-          targetCenter.x, targetCenter.y,
-          targetEndX, targetEndY,
-          visuals.targetDeflectColor, 2, 8, 5, 0.9
-        );
-      }
-
-      // 4. Draw dashed line for cue ball projected deflection direction (starting from ghost contact center)
-      if (cueDeflect) {
-        const cueEndX = ghostCenter.x + cueDeflect.x * 90;
-        const cueEndY = ghostCenter.y + cueDeflect.y * 90;
-        this.drawDashedLine(
-          ghostCenter.x, ghostCenter.y,
-          cueEndX, cueEndY,
-          visuals.cueDeflectColor, 2, 8, 5, 0.8
-        );
-      }
     } else {
       // Draw infinite/long aiming helper dashed line since no hit registered
       const longEndX = startX + strokeDir.x * 400;

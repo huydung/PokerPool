@@ -58,7 +58,7 @@ async function initSandbox() {
     // Step B: Synchronize Pixi graphics to Matter.js coordinates
     renderer.syncPositions(physics.cueBall, physics.targetBalls);
 
-    // Step C: Calculate and render the aiming laser lines & deflection paths
+    // Step C: Calculate and render the aiming laser line & ghost ball
     const aimData = controls.getAimData();
     renderer.drawAimLine(aimData);
 
