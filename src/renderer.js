@@ -455,11 +455,27 @@ export class CanvasRenderer {
   drawAimLine(aimData) {
     this.aimGraphics.clear();
 
-    if (!aimData) return;
+    if (!aimData) {
+      if (this.activePlayerText) {
+        this.activePlayerText.text = "TURN: SUSAN\n(Balls Rolling...)";
+        this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
+      }
+      return;
+    }
 
-    const { startX, startY, strokeDir, dragDist } = aimData;
+    const { startX, startY, strokeDir, dragDist, isLocked } = aimData;
     const { maxDrag, cue } = this.config.cue;
     const visuals = this.config.visuals.aiming;
+
+    // Update HUD center text based on lock state
+    if (this.activePlayerText) {
+      if (isLocked) {
+        this.activePlayerText.text = "AIM LOCKED!\n(Drag Slider to Shoot • Click to Unlock)";
+      } else {
+        this.activePlayerText.text = "TURN: SUSAN\n(Move Mouse to Aim • Click to Lock)";
+      }
+      this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
+    }
 
     // A. Draw the solid interactive cue stick pointing towards the cue ball
     // Extended backward opposite of aim direction
@@ -506,7 +522,23 @@ export class CanvasRenderer {
     if (strokeForceRatio > 0.85) powerColor = 0xf44336;
     this.aimGraphics.fill({ color: powerColor });
 
+    // Draw glowing ring around start coordinates (cue ball position) if locked
+    if (isLocked) {
+      this.aimGraphics.circle(startX, startY, this.config.ball.radius + 4);
+      this.aimGraphics.stroke({
+        color: 0x00e5ff,
+        width: 2,
+        alpha: 0.8
+      });
+    }
+
     // C. Draw Aiming Laser Assist paths if raycast hit is registered
+    const laserColor = isLocked ? 0x00e5ff : visuals.laserColor;
+    const laserWidth = isLocked ? 2.5 : 2;
+    const laserAlpha = isLocked ? 0.9 : visuals.laserAlpha;
+    const infiniteLaserWidth = isLocked ? 2.5 : 1.5;
+    const infiniteLaserAlpha = isLocked ? 0.9 : 0.3;
+
     if (aimData.hasHit && aimData.ghostCenter) {
       const { ghostCenter, targetCenter, targetDeflect, cueDeflect } = aimData;
 
@@ -514,15 +546,15 @@ export class CanvasRenderer {
       this.drawDashedLine(
         startX, startY,
         ghostCenter.x, ghostCenter.y,
-        visuals.laserColor, 2, 10, 6, visuals.laserAlpha
+        laserColor, laserWidth, 10, 6, laserAlpha
       );
 
       // 2. Draw ghost cue ball at the exact contact point
       this.aimGraphics.circle(ghostCenter.x, ghostCenter.y, this.config.ball.radius);
       this.aimGraphics.stroke({
-        color: visuals.ghostColor,
+        color: isLocked ? 0x00e5ff : visuals.ghostColor,
         width: 1.5,
-        alpha: visuals.ghostAlpha
+        alpha: isLocked ? 0.9 : visuals.ghostAlpha
       });
 
       // 3. Draw dashed line for target ball projected deflection direction (starting from target ball center)
@@ -553,7 +585,7 @@ export class CanvasRenderer {
       this.drawDashedLine(
         startX, startY,
         longEndX, longEndY,
-        visuals.laserColor, 1.5, 10, 6, 0.3
+        laserColor, infiniteLaserWidth, 10, 6, infiniteLaserAlpha
       );
     }
   }

@@ -66,6 +66,8 @@ When a ball drops into an active pocket, its programmatic identity is instantly 
 - **Table Aesthetics**: Styled as a sleek blue felt table with elegant wooden rail borders, matching `gameref.png`.
 - **Advanced Raycast Aiming**: When aiming the cue stick at a target ball, the engine runs a real-time ray-cast. It projects a path from the cue ball, placing a **ghost cue ball** at the exact predicted point of contact with the target ball.
 - **Deflection Lines**: Displays a projected target ball deflection path extending along the normal vector between the ghost cue ball and target ball centers, and a perpendicular cue ball deflection path.
+- **Precision Aim Lock-In**: Enables players to lock the aiming angle (left-click anywhere on the table for PC/Mouse, or automatically on releasing the finger/pointerup for Mobile/Touch). While locked, moving the cursor to the left power slider does not disrupt the aimed angle. Left-clicking on the table again on PC unlocks the angle.
+- **Visual Locked-In Cues**: When the aim is locked, the laser guide line and ghost cue ball outline glow with a high-opacity, thick neon-cyan (`0x00e5ff`) paint, and a glowing ring is rendered around the cue ball (`radius + 4`). When unlocked, standard thin white dashed guides are drawn.
 - **Pocket Glow Indicators**: Pockets glow **Green** if pocketing the targeted ball registers a valid new card in the active player's hand, **Yellow** if the pocket is unclaimed/unmapped (Phase 1), and **Red** if pocketing is invalid (causes duplication, standard ball in wild pocket, etc.).
 
 ### Hand Swapping (The 5-Card Cap)

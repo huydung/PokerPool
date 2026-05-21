@@ -198,4 +198,12 @@ Milestone 1 has been completely executed, tested, and validated. The following d
 - **TDD Decoupling & Loop Variables**: Loop variables for `event.pairs` iterators are named `collisionPair` rather than the card-hand domain term `pair` to satisfy strict decoupled unit test searches.
 - **Asynchronous Test Runner Execution**: Refactored test assertions in `tests/physics.test.js` to run asynchronously using `async/await`, resolving promise-leaking unhandled rejections and calibrating tolerances to realistic physics tick step resolutions.
 
+### Milestone 1.3: Precision Aim Lock-In Implementation
+- **Aiming Angle Lock-In State**: Added `isLocked` state variable in `AimingControls` (`src/controls.js`) that locks in shot vectors.
+- **PC/Mouse Controls**: Left-clicking anywhere on the table locks/unlocks the current aiming angle, allowing movement to the power slider without snapping.
+- **Mobile/Touch Controls**: Tapping and dragging on the table aims. Releasing the touch (`pointerup`) automatically locks the angle so that the player can safely drag the left slider.
+- **Neon Cyan Guide Line & Glowing Ring**: When aiming is locked, drawing high-opacity, thick neon-cyan (`0x00e5ff`) guide lines and a glowing circle around the cue ball center, adding premium visual indicator cues.
+- **Dynamic HUD Instructions**: Re-centered HUD status text cycles between unlocked aiming instructions, locked power slider instructions, and active balls rolling states.
+- **Unit Testing**: Created `tests/aimLock.test.js` containing 5 automated tests validating aiming lock states, mouse clicks, move prevention, and mobile touch releases.
+
 All unit tests are **100% green and compile successfully**. The local development environment compiles cleanly.

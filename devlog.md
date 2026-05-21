@@ -98,3 +98,33 @@ This log tracks all architectural decisions, design choices, physical coordinate
 - **Cause**: Single-tick forces are integrated alongside residual velocities and coordinate integrations, causing small rounding differences.
 - **Resolution**: Directly applied calculated initial velocities (`Matter.Body.setVelocity`) to start movement exactly along the aimed line, ensuring perfect trajectory alignment.
 
+---
+
+## Milestone 1.3 - Precision Aim Lock-In & Visual HUD Polish (2026-05-21)
+
+### Key Decisions
+1. **Precision Aim Lock-In State**: Introduced a togglable aiming angle lock-in state (`this.isLocked` in `AimingControls`).
+   - **PC/Mouse Controls**: Left-clicking anywhere on the table locks the aiming angle, rendering a high-visibility laser line and allowing the user to freely move the cursor to the left power slider without snapping or changing the shot direction. Clicking on the table again unlocks the aim and snaps back to the cursor direction.
+   - **Mobile/Touch Controls**: Tap-and-drag on the table aims. Releasing the finger (`pointerup`) automatically locks the aiming angle, allowing players to safely slide the left power handle to charge and fire.
+2. **Neon Cyan Guidance Visuals**:
+   - Draw a glowing neon-cyan aiming guide (`0x00e5ff`) with higher width (`2.5`) and opacity (`0.9`) when the aim is locked, distinguishing it from the thin dashed white guide line when unlocked.
+   - Added a glowing ring around the cue ball (`radius + 4`) when locked, providing clear visual feedback of the locked-in status.
+3. **Dynamic HUD Instructions**:
+   - Refactored the center HUD turn banner to dynamically cycle instructions between:
+     - Unlocked state: `TURN: SUSAN\n(Move Mouse to Aim • Click to Lock)`
+     - Locked state: `AIM LOCKED!\n(Drag Slider to Shoot • Click to Unlock)`
+     - Balls Rolling state: `TURN: SUSAN\n(Balls Rolling...)`
+4. **Comprehensive Test Suite**:
+   - Created a standalone test suite `tests/aimLock.test.js` validating the lock-in mechanics, ensuring mouse clicks toggle the lock state, pointer moves are ignored during locked states, and touch events automatically lock the state on pointerup.
+
+### Major Bugs & Lessons Learned
+
+#### 1. Canvas Boundary Click Registration
+- **Symptom**: Quick mouse clicks to lock the aim sometimes caused the cursor to drag a tiny bit, which would unlock or snap the angle unexpectedly if the distance check was too sensitive.
+- **Cause**: Moving the cursor while clicking triggers both `pointerdown` and a minor `pointermove` event. If the system is unlocked, it handles `pointermove` and updates the direction.
+- **Resolution**: Ensured the lock state toggle is immediate on `pointerdown` and pointermove is strictly guarded by `!this.isLocked` for mouse pointer types. This completely isolates state updates, preserving the locked vector.
+
+#### 2. Mobile Pointerup Auto-Lock Transition
+- **Symptom**: Releasing the finger on touch screens during dragging should lock the aim, but tapping the screen again should let you adjust the aim without firing the cue immediately.
+- **Cause**: The pointer type distinction had to be clean to prevent standard desktop clicks from firing mobile-only auto-lock logic.
+- **Resolution**: Cleanly isolated touch gestures using `e.pointerType === 'touch'`. On touch pointerdown, `isLocked` is reset to false to allow direct angle readjustments, and on window pointerup, `isLocked` is set to true only if `this.isAiming` was active, ensuring smooth aiming transitions.

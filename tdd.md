@@ -102,6 +102,9 @@ Your objective is to implement the Core Physics & Interactive Aiming Sandbox usi
      * No 'magic numbers' are read outside of the configuration module.
      * Ball-to-ball collisions compute elastic rebounds using configuration density/restitution parameters.
      * Matter.js is completely modular and has zero references to player hands or card rankings.
+     * Mouse pointerdown clicks on the canvas toggle the aiming `isLocked` state machine.
+     * Pointermove events during locked states do not modify the `strokeDir` vector.
+     * Touch pointerup releases trigger automatic aiming angle lock-in state transitions.
 ```
 
 ### 3.2 Milestone 2: Game Initialization & Safe-Haven Break

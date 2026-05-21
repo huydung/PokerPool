@@ -18,6 +18,7 @@ export class AimingControls {
 
     // Interaction states
     this.isAiming = false;
+    this.isLocked = false; // Aiming angle lock-in state
     this.isDraggingSlider = false;
     this.startDragPos = { x: 0, y: 0 };
     this.currentMousePos = { x: 512, y: 338 }; // Centered default
@@ -71,18 +72,40 @@ export class AimingControls {
         const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
         this.dragDist = dragRatio * this.config.cue.maxDrag;
       } else {
-        // Case B: Table tap/drag interaction: adjust aiming rotation immediately
+        // Case B: Table tap/drag interaction
         this.isDraggingSlider = false;
-        this.isAiming = true; // Flag active pointerdown aiming on table
-        const cueBall = this.physics.cueBall;
-        const dx = mouseX - cueBall.position.x;
-        const dy = mouseY - cueBall.position.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 0.1) {
-          this.strokeDir = {
-            x: dx / dist,
-            y: dy / dist
-          };
+        
+        if (e.pointerType === 'touch') {
+          // Mobile/Touch device: start table aiming, unlock angle for current gesture
+          this.isAiming = true;
+          this.isLocked = false; 
+          const cueBall = this.physics.cueBall;
+          const dx = mouseX - cueBall.position.x;
+          const dy = mouseY - cueBall.position.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0.1) {
+            this.strokeDir = {
+              x: dx / dist,
+              y: dy / dist
+            };
+          }
+        } else {
+          // PC/Mouse device: Click on table toggles lock state
+          this.isLocked = !this.isLocked;
+          
+          // If newly unlocked, snap aiming direction instantly to mouse click coordinate
+          if (!this.isLocked) {
+            const cueBall = this.physics.cueBall;
+            const dx = mouseX - cueBall.position.x;
+            const dy = mouseY - cueBall.position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0.1) {
+              this.strokeDir = {
+                x: dx / dist,
+                y: dy / dist
+              };
+            }
+          }
         }
       }
     });
@@ -105,25 +128,41 @@ export class AimingControls {
         const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
         this.dragDist = dragRatio * this.config.cue.maxDrag;
       } else {
-        // Rotating: update vector direction only if pointer is outside the slider zones (avoids sudden angles when aiming/clicking slider)
+        // Rotating: update vector direction only if pointer is outside the slider zones
         if (!this.isInsideSlider(mouseX, mouseY)) {
           const cueBall = this.physics.cueBall;
           const dx = mouseX - cueBall.position.x;
           const dy = mouseY - cueBall.position.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 0.1) {
-            this.strokeDir = {
-              x: dx / dist,
-              y: dy / dist
-            };
+          
+          if (e.pointerType === 'touch') {
+            // Touch device: only rotate while actively aiming (finger dragged on table)
+            if (this.isAiming && dist > 0.1) {
+              this.strokeDir = {
+                x: dx / dist,
+                y: dy / dist
+              };
+            }
+          } else {
+            // Mouse device: only rotate if angle is UNLOCKED
+            if (!this.isLocked && dist > 0.1) {
+              this.strokeDir = {
+                x: dx / dist,
+                y: dy / dist
+              };
+            }
           }
         }
       }
     });
 
     // Window level pointerup (release to fire shot or cancel)
-    window.addEventListener('pointerup', () => {
-      this.isAiming = false; // Release table drag flag
+    window.addEventListener('pointerup', (e) => {
+      // For mobile touch, releasing finger off table auto-locks aiming angle
+      if (e.pointerType === 'touch' && this.isAiming) {
+        this.isAiming = false;
+        this.isLocked = true;
+      }
 
       if (!this.enabled || !this.physics.cueBall || !this.isDraggingSlider) {
         this.isDraggingSlider = false;
@@ -165,6 +204,9 @@ export class AimingControls {
         
         // Break shot has been completed
         this.physics.isBreakShot = false;
+
+        // Fired shot successfully: reset lock status for next round
+        this.isLocked = false;
       }
 
       this.dragDist = 0;
@@ -289,6 +331,7 @@ export class AimingControls {
 
     return {
       isAiming: this.isAiming,
+      isLocked: this.isLocked,
       startX,
       startY,
       strokeDir: this.strokeDir,
