@@ -62,6 +62,12 @@ export class PhysicsEngine {
     const rightCushion = Matter.Bodies.rectangle(xCenter + hw + rw/2, yCenter, rw, height, cushionOptions);
 
     this.cushions = [topCushion, bottomCushion, leftCushion, rightCushion];
+
+    // Explicitly apply restitution post-construction to bypass Matter.js's static body zeroing override
+    this.cushions.forEach(cushion => {
+      Matter.Body.set(cushion, { restitution: railRestitution });
+    });
+
     Matter.Composite.add(this.world, this.cushions);
   }
 
