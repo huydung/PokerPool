@@ -87,9 +87,13 @@ export class AimingControls {
       // Calculate applied force based on pull back distance
       const cappedDrag = Math.min(this.dragDist, this.config.cue.maxDrag);
       
-      if (cappedDrag >= this.config.cue.minDrag) {
+      // Only trigger shot if pull back distance is sufficient and NOT canceled (greater than cancelDistance)
+      if (cappedDrag >= this.config.cue.minDrag && this.dragDist >= this.config.cue.cancelDistance) {
         const forceMagnitude = cappedDrag * this.config.cue.dragScale;
-        const forceLimit = this.config.cue.maxForce;
+        let forceLimit = this.config.cue.maxForce;
+        if (this.physics.isBreakShot) {
+          forceLimit *= this.config.cue.breakForceMultiplier || 2.0;
+        }
         const appliedForce = Math.min(forceMagnitude, forceLimit);
 
         // Apply dynamic linear impulse to cue ball center
@@ -99,6 +103,9 @@ export class AimingControls {
         };
 
         this.physics.applyCueStroke(forceVector);
+        
+        // Break shot has been completed
+        this.physics.isBreakShot = false;
       }
 
       this.dragDist = 0;
@@ -110,7 +117,7 @@ export class AimingControls {
    * @returns {Object|null} Aiming data or null if not currently aiming
    */
   getAimData() {
-    if (!this.isAiming || !this.physics.cueBall) return null;
+    if (!this.isAiming || !this.physics.cueBall || this.dragDist < this.config.cue.cancelDistance) return null;
 
     const cueBall = this.physics.cueBall;
     const startX = cueBall.position.x;
@@ -222,6 +229,7 @@ export class AimingControls {
       dragDist: this.dragDist,
       hasHit,
       ghostCenter,
+      targetCenter: closestTarget ? { x: closestTarget.position.x, y: closestTarget.position.y } : null,
       targetDeflect,
       cueDeflect
     };
