@@ -140,4 +140,18 @@ describe('Poker Pool - Physics Sandbox TDD Suite', () => {
     // Verify target ball is removed from active targetBalls array
     expect(engine.targetBalls.some(b => b.id === targetId)).toBe(false);
   });
+
+  // ========================================================
+  // 5. HIGH-PRECISION TRAJECTORY CALIBRATION
+  // ========================================================
+  it('should configure balls with zero static friction to prevent tangential throw', () => {
+    const engine = new PhysicsEngine(CONFIG);
+    engine.spawnBalls();
+
+    // Verify static friction is explicitly zeroed out for all active balls
+    expect(engine.cueBall.frictionStatic).toBe(0.0);
+    engine.targetBalls.forEach(ball => {
+      expect(ball.frictionStatic).toBe(0.0);
+    });
+  });
 });

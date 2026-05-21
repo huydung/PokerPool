@@ -128,6 +128,7 @@ export class PhysicsEngine {
       density: density,
       restitution: restitution,
       friction: friction,
+      frictionStatic: 0.0, // Prevent tangential friction-induced spin/deflection during contacts
       frictionAir: frictionAir,
       label: 'ball'
     };
@@ -206,7 +207,14 @@ export class PhysicsEngine {
     // Sync timeScale directly from configuration parameter
     this.engine.timing.timeScale = this.config.ball.timeScale || 1.0;
     
-    Matter.Engine.update(this.engine, dt);
+    // High-Precision Physics Sub-stepping:
+    // Dividing the single frame time step into 10 sub-steps limits per-step displacement,
+    // reducing body penetration to a fraction of a pixel and ensuring extremely accurate collision normals.
+    const subSteps = 10;
+    const subDt = dt / subSteps;
+    for (let i = 0; i < subSteps; i++) {
+      Matter.Engine.update(this.engine, subDt);
+    }
 
     // Limit maximum speed of dynamic bodies to avoid tunneling errors
     const maxSpeed = this.config.ball.maxSpeed;

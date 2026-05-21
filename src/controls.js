@@ -377,12 +377,14 @@ export class AimingControls {
           y: normY / normDist
         };
 
-        // 3. Projected cue ball deflection direction (perpendicular to normal)
-        // cueDeflect = incomingDir - dot(incomingDir, normal) * normal
+        // 3. Projected cue ball deflection direction (accounting for coefficient of restitution)
+        // cueDeflect = incomingDir - coeff * dot(incomingDir, normal) * normal
+        const e = this.config.ball.restitution || 0.95;
+        const coeff = (1 + e) / 2;
         const dotDNorm = this.strokeDir.x * targetDeflect.x + this.strokeDir.y * targetDeflect.y;
         
-        const cueDeflectX = this.strokeDir.x - dotDNorm * targetDeflect.x;
-        const cueDeflectY = this.strokeDir.y - dotDNorm * targetDeflect.y;
+        const cueDeflectX = this.strokeDir.x - coeff * dotDNorm * targetDeflect.x;
+        const cueDeflectY = this.strokeDir.y - coeff * dotDNorm * targetDeflect.y;
         const cueDeflectDist = Math.sqrt(cueDeflectX * cueDeflectX + cueDeflectY * cueDeflectY);
 
         if (cueDeflectDist > 0.01) {

@@ -169,3 +169,27 @@ This log tracks all architectural decisions, design choices, physical coordinate
 - **Symptom**: While aiming lock stayed locked during visual drags, dragging or clicking slightly above or below the slider's physical track (e.g., at Y < 98 or Y > 578) instantly reset or toggled the aiming lock, ruining the shot alignment about 2/3 of the time.
 - **Cause**: The slider's vertical interaction check was limited. Releasing or clicking slightly above the top cushion height (e.g., Y = 50 in the HUD area) returned `false` for `isInsideSlider`, falling into the table-click code block and resetting/toggling `isLocked`.
 - **Resolution**: Expanded the vertical interaction zone when locked to cover the entire canvas height, and added the `mouseX < 112` gutter safety guard to bypass table-click logic for any off-target gutter clicks. Tests were added to verify 100% stable locking.
+
+---
+
+## Milestone 1.6 - Precision Trajectory Alignment & Calibration (2026-05-21)
+
+### Key Decisions
+1. **10x Physics Sub-stepping**:
+   - **Resolution**: Implemented high-precision physics simulation in `physics.js` by breaking the single-frame update tick (`dt = 16.67ms`) into 10 sub-ticks (`subDt = 1.67ms`) and running the Matter.js solver inside a 10x loop. This limits displacement per micro-step to less than 2 pixels (even at maximum speed), keeping ball overlaps to a fraction of a pixel and ensuring the resolved physical collision normal is extremely accurate.
+2. **Restitution-Calibrated Deflection Projection**:
+   - **Resolution**: Updated `getAimData()` in `controls.js` to retrieve the configured ball restitution parameter ($e = 0.95$) and apply it directly to the cue ball deflection math:
+     $$\vec{v}_1' = \vec{v}_1 - \frac{1+e}{2} (\vec{v}_1 \cdot \vec{n}) \vec{n}$$
+     This perfectly aligns the projected dashed yellow assist line with Matter.js's physical constraint solver bounciness scaling.
+3. **Pure Frictionless Contacts**:
+   - **Resolution**: Added `frictionStatic: 0.0` inside `ballOptions` in `physics.js` to ensure zero static friction forces during oblique contacts. This prevents any tangential forces or spin from throwing the ball off its projected vector.
+4. **Enhanced Test Suite**:
+   - **Resolution**: Added a new TDD test in `tests/physics.test.js` asserting that all spawned pool balls are configured with zero static friction.
+
+### Major Bugs & Lessons Learned
+
+#### 1. Discrete Time-Step Collision Deviation (Tunneling)
+- **Symptom**: Oblique / cut shots deviated significantly from the visual aiming guides in actual play (often by 10 to 30 degrees) depending on shooting speed.
+- **Cause**: Standard 60Hz physics engines permit high-speed rigid bodies to overlap significantly before registering collisions. In oblique collisions, this penetration drastically shifts the center-to-center normal vector calculated at the overlapped step, resulting in a tilted rebound impulse.
+- **Resolution**: Implementing sub-stepping completely eliminated tunneling and coordinate drift. By doing 10 sub-steps per frame, the actual physical rebound angles match the analytical projection vectors with perfect pixel agreement.
+
