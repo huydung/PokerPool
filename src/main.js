@@ -53,8 +53,7 @@ async function initSandbox() {
     renderer.drawAimLine(aimData);
 
     // Step D: Render the beautiful glassmorphic power slider on the left edge
-    const maxDrag = CONFIG.cue.maxDrag || 300;
-    renderer.drawPowerSlider(controls.isDraggingSlider, controls.dragDist / maxDrag);
+    renderer.drawPowerSlider(controls.isDraggingSlider, controls.powerRatio);
   });
 
   console.log('Poker Pool Sandbox Initialized successfully');

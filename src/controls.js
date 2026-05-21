@@ -22,7 +22,7 @@ export class AimingControls {
     this.isDraggingSlider = false;
     this.startDragPos = { x: 0, y: 0 };
     this.currentMousePos = { x: 512, y: 338 }; // Centered default
-    this.dragDist = 0;
+    this.powerRatio = 0.0;
     this.strokeDir = { x: 1, y: 0 }; // Default pointing right
     this.activePointerId = undefined; // Track the active pointer for multi-touch safety
 
@@ -123,8 +123,7 @@ export class AimingControls {
       if (this.isInsideSlider(mouseX, mouseY)) {
         this.isDraggingSlider = true;
         this.activePointerId = e.pointerId; // Capture this pointer
-        const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
-        this.dragDist = dragRatio * this.config.cue.maxDrag;
+        this.powerRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
       } else {
         // Gutter Safety Guard: If click/touch is in the left rail/gutter area (mouseX < 112),
         // but somehow missed the slider (e.g. out of vertical bounds), do NOT treat it as a table interaction.
@@ -190,8 +189,7 @@ export class AimingControls {
 
       if (this.isDraggingSlider) {
         // Sliding: update power based on vertical Y displacement
-        const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
-        this.dragDist = dragRatio * this.config.cue.maxDrag;
+        this.powerRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
       } else {
         // Rotating: update vector direction only if pointer is outside the slider zones
         if (!this.isInsideSlider(mouseX, mouseY)) {
@@ -237,7 +235,7 @@ export class AimingControls {
 
       if (!this.enabled || !this.physics.cueBall || !this.isDraggingSlider) {
         this.isDraggingSlider = false;
-        this.dragDist = 0;
+        this.powerRatio = 0.0;
         return;
       }
 
@@ -246,25 +244,21 @@ export class AimingControls {
       // Only trigger shot if all balls are stopped
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) {
-        this.dragDist = 0;
+        this.powerRatio = 0.0;
         return;
       }
 
-      // Calculate applied force based on vertical slider pullback
-      const cappedDrag = Math.min(this.dragDist, this.config.cue.maxDrag);
-      
-      // Release triggers shot if pullback is greater than cancellation threshold
-      if (cappedDrag >= this.config.cue.minDrag && this.dragDist >= this.config.cue.cancelDistance) {
-        const forceMagnitude = cappedDrag * this.config.cue.dragScale;
-        let forceLimit = this.config.cue.maxForce;
-        if (this.physics.isBreakShot) {
-          forceLimit *= this.config.cue.breakForceMultiplier || 2.0;
-        }
-        const appliedForce = Math.min(forceMagnitude, forceLimit);
+      const currentPower = this.powerRatio;
 
-        // Convert the force magnitude to direct velocity vector
-        const cueBall = this.physics.cueBall;
-        const velocityMagnitude = (appliedForce / cueBall.mass) * (1000 / 60);
+      // Release triggers shot if power ratio is greater than minPower
+      if (currentPower >= this.config.cue.minPower) {
+        // Calibrate max speed: normal shot max is 10.0, break shot max is 20.0 (exactly 2x normal max)
+        const maxNormalSpeed = this.config.ball.maxSpeed / 2;
+        const maxShotSpeed = this.physics.isBreakShot ? this.config.ball.maxSpeed : maxNormalSpeed;
+        const minShotSpeed = 0.8; // Calibrated very gentle soft shot speed threshold
+        
+        // Linearly interpolate cue ball velocity magnitude
+        const velocityMagnitude = minShotSpeed + currentPower * (maxShotSpeed - minShotSpeed);
 
         const velocityVector = {
           x: this.strokeDir.x * velocityMagnitude,
@@ -280,7 +274,7 @@ export class AimingControls {
         this.isLocked = false;
       }
 
-      this.dragDist = 0;
+      this.powerRatio = 0.0;
     });
   }
 
@@ -293,8 +287,8 @@ export class AimingControls {
     const allStopped = this.physics.areAllBallsStopped();
     if (!allStopped || !this.physics.cueBall) return null;
 
-    // If dragging slider, hide visual guides if drag distance is below cancel threshold (pulling back to cancel)
-    if (this.isDraggingSlider && this.dragDist < this.config.cue.cancelDistance) {
+    // If dragging slider, hide visual guides if power is below cancelPower threshold (pulling back to cancel)
+    if (this.isDraggingSlider && this.powerRatio < this.config.cue.cancelPower) {
       return null;
     }
 
@@ -408,7 +402,7 @@ export class AimingControls {
       startX,
       startY,
       strokeDir: this.strokeDir,
-      dragDist: this.dragDist,
+      powerRatio: this.powerRatio,
       hasHit,
       ghostCenter,
       targetCenter: closestTarget ? { x: closestTarget.position.x, y: closestTarget.position.y } : null,

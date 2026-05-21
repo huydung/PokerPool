@@ -463,8 +463,7 @@ export class CanvasRenderer {
       return;
     }
 
-    const { startX, startY, strokeDir, dragDist, isLocked } = aimData;
-    const { maxDrag, cue } = this.config.cue;
+    const { startX, startY, strokeDir, powerRatio, isLocked } = aimData;
     const visuals = this.config.visuals.aiming;
 
     // Update HUD center text based on lock state
@@ -479,7 +478,7 @@ export class CanvasRenderer {
 
     // A. Draw the solid interactive cue stick pointing towards the cue ball
     // Extended backward opposite of aim direction
-    const dragRatio = Math.min(dragDist / maxDrag, 1.0);
+    const dragRatio = powerRatio;
     const visualOffset = this.config.cue.visualOffset ?? 25;
     const pullBackDistance = this.config.cue.pullBackDistance ?? 80;
     const cueOffset = visualOffset + dragRatio * pullBackDistance; // Dynamic custom pull-back effect distance
@@ -511,7 +510,7 @@ export class CanvasRenderer {
     });
 
     // B. Draw Shot Power Bar underneath the HUD
-    const strokeForceRatio = Math.min(dragDist / maxDrag, 1.0);
+    const strokeForceRatio = powerRatio;
     this.aimGraphics.rect(20, 105, 1024 - 40, 6);
     this.aimGraphics.fill({ color: 0x1c2b42 });
     
