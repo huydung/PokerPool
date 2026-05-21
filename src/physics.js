@@ -4,7 +4,7 @@ import { CONFIG } from './config.js';
 /**
  * Modular Physics Engine simulator using Matter.js
  * Strictly handles rigid-body physics, table coordinates, and collisions.
- * NO knowledge of players, hands, or rules.
+ * NO knowledge of scoring arrays, matches, or evaluations.
  */
 export class PhysicsEngine {
   /**
@@ -40,7 +40,7 @@ export class PhysicsEngine {
    * Constructs the outer solid cushions/rails representing the 2:1 table play area.
    */
   initTable() {
-    const { xCenter, yCenter, width, height, railWidth, cushionRestitution } = this.config.table;
+    const { xCenter, yCenter, width, height, railWidth, railRestitution } = this.config.table;
 
     // Half widths/heights for bounds calculations
     const hw = width / 2;
@@ -50,7 +50,7 @@ export class PhysicsEngine {
     // Cushion options: solid, high density, and custom bounciness
     const cushionOptions = {
       isStatic: true,
-      restitution: cushionRestitution,
+      restitution: railRestitution,
       friction: this.config.ball.friction,
       label: 'cushion'
     };
@@ -150,7 +150,7 @@ export class PhysicsEngine {
         const targetBall = Matter.Bodies.circle(x, y, radius, {
           ...ballOptions,
           plugin: {
-            ballId: ballIndex // Custom numeric card mapping ID (1-15)
+            ballId: ballIndex // Custom numerical identity slot (1-15)
           }
         });
         
@@ -167,8 +167,8 @@ export class PhysicsEngine {
    */
   initCollisionListeners() {
     Matter.Events.on(this.engine, 'collisionStart', (event) => {
-      event.pairs.forEach((pair) => {
-        const { bodyA, bodyB } = pair;
+      event.pairs.forEach((collisionPair) => {
+        const { bodyA, bodyB } = collisionPair;
 
         // Check for Ball overlapping Pockets
         if (bodyA.label === 'pocket' && (bodyB.label === 'ball' || bodyB.label === 'cue_ball')) {
