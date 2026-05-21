@@ -38,16 +38,16 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
   // ========================================================
   // 1. DETERMINISTIC PROTECTED RACK
   // ========================================================
-  it('should ensure high-value balls (A, J, Q, K) are placed deterministically at exact positions (indices 3, 7, 4, 8)', () => {
+  it('should ensure high-value balls (A, J, Q, K) are placed deterministically at exact positions (indices 4, 7, 8, 12)', () => {
     const physics = new PhysicsEngine(CONFIG);
 
     for (let testRun = 0; testRun < 20; testRun++) {
       physics.spawnBalls();
       
-      expect(physics.targetBalls[3].plugin.ballId).toBe(1);  // A
-      expect(physics.targetBalls[4].plugin.ballId).toBe(12); // Q
-      expect(physics.targetBalls[7].plugin.ballId).toBe(11); // J
-      expect(physics.targetBalls[8].plugin.ballId).toBe(13); // K
+      expect(physics.targetBalls[4].plugin.ballId).toBe(1);   // A in middle of 3rd row (index 4)
+      expect(physics.targetBalls[7].plugin.ballId).toBe(12);  // Q in middle of 4th row (index 7)
+      expect(physics.targetBalls[8].plugin.ballId).toBe(11);  // J in middle of 4th row (index 8)
+      expect(physics.targetBalls[12].plugin.ballId).toBe(13); // K in middle of 5th row (index 12)
     }
   });
 

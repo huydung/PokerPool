@@ -348,6 +348,7 @@ export class AimingControls {
     // 5. Run simulation loop to detect the first collision
     let collisionOccurred = false;
     let hitTempTarget = null;
+    let collisionCueBallPos = null;
     const maxSteps = 300; // safety ceiling
     const dt = 16.666;
     const subSteps = 10;
@@ -357,14 +358,18 @@ export class AimingControls {
       // Step the virtual physics engine frame (using identical high-precision 10 sub-stepping parameters)
       for (let s = 0; s < subSteps; s++) {
         Matter.Engine.update(tempEngine, subDt);
-      }
 
-      // Check for collisions between cue ball and target balls
-      const collisions = Matter.Query.collides(tempCueBall, tempTargetBalls);
-      if (collisions.length > 0) {
-        collisionOccurred = true;
-        const col = collisions[0];
-        hitTempTarget = col.bodyA === tempCueBall ? col.bodyB : col.bodyA;
+        // Check for collisions inside the sub-step loop to catch the exact moment of contact
+        const collisions = Matter.Query.collides(tempCueBall, tempTargetBalls);
+        if (collisions.length > 0) {
+          collisionOccurred = true;
+          const col = collisions[0];
+          hitTempTarget = col.bodyA === tempCueBall ? col.bodyB : col.bodyA;
+          collisionCueBallPos = { x: tempCueBall.position.x, y: tempCueBall.position.y };
+          break;
+        }
+      }
+      if (collisionOccurred) {
         break;
       }
     }
@@ -423,9 +428,9 @@ export class AimingControls {
         }
       }
 
-      // Fallback ghost center if analytical fails
-      if (!ghostCenter) {
-        ghostCenter = { x: hitTempTarget.position.x, y: hitTempTarget.position.y };
+      // Fallback ghost center if analytical fails: use the exact cue ball position at the moment of virtual collision!
+      if (!ghostCenter && collisionCueBallPos) {
+        ghostCenter = { x: collisionCueBallPos.x, y: collisionCueBallPos.y };
       }
     }
 

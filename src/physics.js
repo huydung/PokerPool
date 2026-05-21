@@ -150,13 +150,14 @@ export class PhysicsEngine {
     const rowOffset = radius * Math.sqrt(3); // Triangle row spacing offset
 
     // Deterministic Protected Rack setup:
-    // High-value balls placed at exact coordinates:
-    // A (1) at index 3, Queen (12) at index 4, Jack (11) at index 7, King (13) at index 8
+    // A (1) in middle of 3rd row -> index 4
+    // J (11) and Q (12) in middle positions of 4th row -> indices 7 and 8
+    // K (13) in middle of 5th/last row -> index 12
     const ballIds = new Array(15);
-    ballIds[3] = 1;  // A
-    ballIds[4] = 12; // Q
-    ballIds[7] = 11; // J
-    ballIds[8] = 13; // K
+    ballIds[4] = 1;   // A
+    ballIds[7] = 12;  // Q
+    ballIds[8] = 11;  // J
+    ballIds[12] = 13; // K
 
     // Other balls (2-10, 14, 15)
     const otherValues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15];
@@ -168,7 +169,7 @@ export class PhysicsEngine {
 
     let otherIdx = 0;
     for (let i = 0; i < 15; i++) {
-      if (i === 3 || i === 4 || i === 7 || i === 8) continue;
+      if (i === 4 || i === 7 || i === 8 || i === 12) continue;
       ballIds[i] = otherValues[otherIdx++];
     }
 
