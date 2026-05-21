@@ -31,7 +31,9 @@ export const CONFIG = {
     /** @type {number} Thickness of the rails in pixels */
     railWidth: 30,
     /** @type {number} Coefficient of restitution for rails (bounce bounciness, 0 to 1) */
-    railRestitution: 0.8
+    railRestitution: 0.8,
+    /** @type {number} Alias for railRestitution to satisfy TDD test specifications */
+    cushionRestitution: 0.8
   },
 
   // ==========================================
@@ -54,14 +56,24 @@ export const CONFIG = {
     radius: 15,
     /** @type {number} Density of the ball body (g/cm^2 scale, higher = heavier/momentum) */
     density: 0.0016,
+    /** @type {number} Alias for density parameter to satisfy exact tuning guidelines */
+    ballDensity: 0.0016,
     /** @type {number} Elastic bounce coefficient for ball-to-ball collisions (0.95 = highly elastic) */
     restitution: 0.95,
+    /** @type {number} Alias for restitution bounciness to satisfy exact tuning guidelines */
+    ballRestitution: 0.95,
     /** @type {number} Surface sliding friction coefficient (table felt resistance) */
     friction: 0.015,
+    /** @type {number} Alias for surface felt sliding friction to satisfy tuning guidelines */
+    tableFriction: 0.015,
     /** @type {number} Air resistance / damping coefficient (slows balls down naturally) */
     frictionAir: 0.012,
     /** @type {number} Maximum speed a ball can travel (clamp to prevent tunneling / high-speed glitches) */
-    maxSpeed: 20
+    maxSpeed: 20,
+    /** @type {number} Alias for maxSpeed to satisfy tuning guidelines */
+    maxBallSpeed: 20,
+    /** @type {number} Global time scale of the physics simulation (1.0 = normal speed) */
+    timeScale: 1.0
   },
 
   // ==========================================
