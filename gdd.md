@@ -64,11 +64,10 @@ When a ball drops into an active pocket, its programmatic identity is instantly 
 
 - **Canvas Scale & Aspect Ratio**: The application is built on a fixed **1024 x 576** canvas size (16:9 aspect ratio) with responsive letterboxing (black bars surrounding the canvas on non-16:9 screens) to ensure physics coordinates remain fully deterministic across all displays.
 - **Table Aesthetics**: Styled as a sleek blue felt table with elegant wooden rail borders, matching `gameref.png`.
-- **Advanced Raycast Aiming**: When aiming the cue stick at a target ball, the engine runs a real-time ray-cast. It projects a path from the cue ball, placing a **ghost cue ball** at the exact predicted point of contact with the target ball.
-- **Deflection Lines**: Displays a projected target ball deflection path extending along the normal vector between the ghost cue ball and target ball centers, and a perpendicular cue ball deflection path.
+- **Advanced Raycast Aiming**: When aiming the cue stick at a target ball, the engine runs a real-time ray-cast. It projects a path from the cue ball, placing a **ghost cue ball** at the exact predicted point of contact with the target ball. No deflection or projection lines are shown — only the ghost ball.
 - **Precision Aim Lock-In**: Enables players to lock the aiming angle (left-click anywhere on the table for PC/Mouse, or automatically on releasing the finger/pointerup for Mobile/Touch). While locked, moving the cursor to the left power slider does not disrupt the aimed angle. Left-clicking on the table again on PC unlocks the angle. To prevent accidental unlocks, the slider's detection box is dynamically expanded horizontally (up to x = 140) and vertically (covering the entire canvas height) when aim is locked, and a left gutter safety guard ignores any off-target clicks in the left gutter (x < 112) without resetting the lock. For multi-touch safety, secondary pointer inputs are ignored while dragging.
 - **Visual Locked-In Cues**: When the aim is locked, the laser guide line and ghost cue ball outline glow with a high-opacity, thick neon-cyan (`0x00e5ff`) paint, and a glowing ring is rendered around the cue ball (`radius + 4`). When unlocked, standard thin white dashed guides are drawn.
-- **Pocket Glow Indicators**: Pockets glow **Green** if pocketing the targeted ball registers a valid new card in the active player's hand, **Yellow** if the pocket is unclaimed/unmapped (Phase 1), and **Red** if pocketing is invalid (causes duplication, standard ball in wild pocket, etc.).
+- **Pocket Rendering**: Pockets display their suit symbol and suit-color rim once claimed. No dynamic glow or color change during aiming.
 
 ### Hand Swapping (The 5-Card Cap)
 

@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, Text, TextStyle, Sprite, Texture } from 'pixi.js';
 import { CONFIG } from './config.js';
+import { evaluatePokerHand } from './poker.js';
 
 /**
  * CanvasRenderer using Pixi.js
@@ -40,10 +41,10 @@ export class CanvasRenderer {
     this.activePlayerText = null;
     this.p1HUDContainer = null;
     this.p2HUDContainer = null;
-    this.p1PanelBg = null;
-    this.p2PanelBg = null;
     this.p1Hearts = [];
     this.p2Hearts = [];
+    this.p1HandLabel = null;
+    this.p2HandLabel = null;
 
     // Laser overlay graphics
     this.aimGraphics = new Graphics();
@@ -131,19 +132,16 @@ export class CanvasRenderer {
    */
   drawHeart(graphics, x, y, size) {
     graphics.clear();
-    const topY = y - size / 2;
-    const bottomY = y + size / 2;
-    const leftX = x - size / 2;
-    const rightX = x + size / 2;
-    
+    const halfSize = size / 2;
+
     graphics.moveTo(x, y - size * 0.2);
     // Left lobe
-    graphics.bezierCurveTo(x - size * 0.3, y - size * 0.6, leftX, y - size * 0.3, leftX, y + size * 0.05);
-    graphics.bezierCurveTo(leftX, y + size * 0.35, x - size * 0.25, y + size * 0.5, x, bottomY);
+    graphics.bezierCurveTo(x - size * 0.3, y - size * 0.6, x - halfSize, y - size * 0.3, x - halfSize, y + size * 0.05);
+    graphics.bezierCurveTo(x - halfSize, y + size * 0.35, x - size * 0.25, y + halfSize, x, y + halfSize);
     // Right lobe
-    graphics.bezierCurveTo(x + size * 0.25, y + size * 0.5, rightX, y + size * 0.35, rightX, y + size * 0.05);
-    graphics.bezierCurveTo(rightX, y - size * 0.3, x + size * 0.3, y - size * 0.6, x, y - size * 0.2);
-    
+    graphics.bezierCurveTo(x + size * 0.25, y + halfSize, x + halfSize, y + size * 0.35, x + halfSize, y + size * 0.05);
+    graphics.bezierCurveTo(x + halfSize, y - size * 0.3, x + size * 0.3, y - size * 0.6, x, y - size * 0.2);
+
     graphics.fill({ color: 0xffffff });
   }
 
@@ -328,6 +326,20 @@ export class CanvasRenderer {
     this.p1CardsContainer.y = 42;
     p1Container.addChild(this.p1CardsContainer);
 
+    // Hand label (real-time poker hand rank display)
+    const p1LabelStyle = new TextStyle({
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: 10,
+      fontWeight: 'bold',
+      fill: 0x00e5ff,
+      alpha: 0.9
+    });
+    const p1HandLabel = new Text({ text: '', style: p1LabelStyle });
+    p1HandLabel.x = 0;
+    p1HandLabel.y = 90;
+    p1Container.addChild(p1HandLabel);
+    this.p1HandLabel = p1HandLabel;
+
     this.hudContainer.addChild(p1Container);
 
     // 2. Player 2 Info Panel
@@ -372,6 +384,20 @@ export class CanvasRenderer {
     this.p2CardsContainer.x = 0;
     this.p2CardsContainer.y = 42;
     p2Container.addChild(this.p2CardsContainer);
+
+    // Hand label (real-time poker hand rank display)
+    const p2LabelStyle = new TextStyle({
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: 10,
+      fontWeight: 'bold',
+      fill: 0xe040fb,
+      alpha: 0.9
+    });
+    const p2HandLabel = new Text({ text: '', style: p2LabelStyle });
+    p2HandLabel.x = 0;
+    p2HandLabel.y = 90;
+    p2Container.addChild(p2HandLabel);
+    this.p2HandLabel = p2HandLabel;
 
     this.hudContainer.addChild(p2Container);
 
@@ -780,7 +806,7 @@ export class CanvasRenderer {
       });
     }
 
-    // C. Draw Aiming Laser Assist paths if raycast hit is registered
+    // C. Draw Aiming Laser Assist — dashed line to ghost ball only (no deflection lines, no pocket glow)
     const laserColor = isLocked ? 0x00e5ff : visuals.laserColor;
     const laserWidth = isLocked ? 2.5 : 2;
     const laserAlpha = isLocked ? 0.9 : visuals.laserAlpha;
@@ -790,14 +816,14 @@ export class CanvasRenderer {
     if (aimData.hasHit && aimData.ghostCenter) {
       const { ghostCenter } = aimData;
 
-      // 1. Draw dashed line from cue ball center to the ghost ball position
+      // Draw dashed line from cue ball center to the ghost ball contact position
       this.drawDashedLine(
         startX, startY,
         ghostCenter.x, ghostCenter.y,
         laserColor, laserWidth, 10, 6, laserAlpha
       );
 
-      // 2. Draw ghost cue ball at the exact contact point
+      // Draw ghost cue ball outline at the exact contact point
       this.aimGraphics.circle(ghostCenter.x, ghostCenter.y, this.config.ball.radius);
       this.aimGraphics.stroke({
         color: isLocked ? 0x00e5ff : visuals.ghostColor,
@@ -805,7 +831,7 @@ export class CanvasRenderer {
         alpha: isLocked ? 0.9 : visuals.ghostAlpha
       });
     } else {
-      // Draw infinite/long aiming helper dashed line since no hit registered
+      // No hit — draw a long dashed helper line in the aim direction
       const longEndX = startX + strokeDir.x * 400;
       const longEndY = startY + strokeDir.y * 400;
       this.drawDashedLine(
@@ -815,6 +841,7 @@ export class CanvasRenderer {
       );
     }
   }
+
 
   /**
    * Custom helper to draw vector dashed lines in Pixi.js
@@ -827,8 +854,6 @@ export class CanvasRenderer {
     const steps = dist / (dashLen + gapLen);
     const xStep = (dx / dist) * (dashLen + gapLen);
     const yStep = (dy / dist) * (dashLen + gapLen);
-    
-    const dashRatio = dashLen / (dashLen + gapLen);
     
     this.aimGraphics.moveTo(x1, y1);
 
@@ -917,6 +942,38 @@ export class CanvasRenderer {
       }
     });
   }
+
+  /**
+   * Returns a text label describing the best partial hand type from 2–5 cards.
+   * Shows nothing for 0–1 cards; shows full evaluation for 5 cards.
+   * @param {Array} hand Array of card objects {rank, suit}
+   * @returns {string} Label string or empty string
+   */
+  _getPartialHandLabel(hand) {
+    if (!hand || hand.length < 2) return '';
+    if (hand.length === 5) {
+      const ev = evaluatePokerHand(hand);
+      return ev.label;
+    }
+    // Partial hand: detect pairs, two pair, and flush potential
+    const counts = {};
+    hand.forEach(c => { counts[c.rank] = (counts[c.rank] || 0) + 1; });
+    const vals = Object.values(counts).sort((a, b) => b - a);
+    const isFlushDraw = hand.every(c => c.suit === hand[0].suit);
+    if (vals[0] === 4) return 'Four of a Kind (in progress)';
+    if (vals[0] === 3 && vals[1] === 2) return 'Full House (in progress)';
+    if (vals[0] === 3) return 'Three of a Kind (in progress)';
+    if (vals[0] === 2 && vals[1] === 2) return 'Two Pair (in progress)';
+    if (vals[0] === 2) {
+      const rankNames = { 1: 'Aces', 11: 'Jacks', 12: 'Queens', 13: 'Kings' };
+      const pairRank = Object.entries(counts).find(([, v]) => v === 2)?.[0];
+      return `Pair of ${rankNames[pairRank] || (pairRank + 's')}`;
+    }
+    if (isFlushDraw) return 'Flush Draw';
+    return 'High Card';
+  }
+
+
 
   /**
    * Renders a styled mini card graphic on the HUD player panels.
@@ -1011,6 +1068,15 @@ export class CanvasRenderer {
 
     if (this.player2ScoreText) {
       this.player2ScoreText.text = `Hand Cards (${p2Hand.length}/5)`;
+    }
+
+    // 3a. Update real-time poker hand label below card slots
+    if (this.p1HandLabel) {
+      this.p1HandLabel.text = this._getPartialHandLabel(p1Hand);
+    }
+
+    if (this.p2HandLabel) {
+      this.p2HandLabel.text = this._getPartialHandLabel(p2Hand);
     }
 
     // Update hearts indicators for misses (3-miss rule)

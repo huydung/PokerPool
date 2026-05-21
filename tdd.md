@@ -165,11 +165,9 @@ Your objective is to develop the Phase 1 Suit Mapping system, dynamic aiming ass
    - Only Wildcard balls (14 & 15) are permitted to score inside the Wild Pockets.
 
 3. LIVE AIMING ASSIST:
-   - Create a dynamic aiming evaluation function: as the player points the cue stick at a targeted ball, calculate which pocket it is projected to enter.
-   - Render a glowing ring around the target pocket in real time:
-     * YELLOW: If the pocket is unclaimed (Phase 1).
-     * GREEN: If pocketing the ball registers a valid new card in the active player's hand.
-     * RED: If pocketing the ball is invalid (e.g. the player already holds that card rank/suit, or is shooting a standard ball into a Wild Pocket).
+   - Implement the raycast aiming: project a path from the cue ball and show a **ghost cue ball** outline at the exact predicted contact point with the targeted ball.
+   - No deflection or projection lines are rendered — only the ghost ball and the dashed laser line to it.
+   - Pockets do not change color or glow during aiming; they display their static suit-state at all times.
 
 4. TDD REQUIREMENTS & TEST CHECKLIST:
    - Write unit tests verifying:

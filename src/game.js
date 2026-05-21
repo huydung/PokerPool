@@ -85,7 +85,7 @@ export class GameEngine {
       overlay.className = 'coin-toss-overlay';
       overlay.innerHTML = `
         <div class="coin-toss-card">
-          <h2 class="coin-toss-title">MATCH INITS</h2>
+          <h2 class="coin-toss-title">COIN TOSS</h2>
           <div class="coin-container">
             <div class="coin" id="coin-visual">
               <div class="coin-front">A</div>
@@ -136,10 +136,6 @@ export class GameEngine {
     });
   }
 
-  /**
-   * Registers sensory pockets overlap events
-   * @param {Matter.Body} ball The pocketed ball body
-   */
   /**
    * Registers sensory pockets overlap events
    * @param {Matter.Body} ball The pocketed ball body
@@ -244,8 +240,8 @@ export class GameEngine {
 
     if (this.gameEnded) return;
 
-    // Stand countdown decrement for active shooting player when opponent has stood
-    if (this.standingPlayer) {
+    // Stand countdown decrement — only applies during normal (non-break) shots
+    if (!this.isBreakShot && this.standingPlayer) {
       this.standCountdown--;
       console.log(`Stand countdown: ${this.standCountdown} shots remaining for ${this.activePlayer}.`);
       if (this.standCountdown <= 0) {
