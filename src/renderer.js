@@ -35,6 +35,9 @@ export class CanvasRenderer {
 
     // Laser overlay graphics
     this.aimGraphics = new Graphics();
+
+    // Slider overlay graphics
+    this.sliderGraphics = new Graphics();
   }
 
   /**
@@ -69,6 +72,7 @@ export class CanvasRenderer {
     this.app.stage.addChild(this.aimContainer);
     this.app.stage.addChild(this.ballContainer);
     this.app.stage.addChild(this.hudContainer);
+    this.app.stage.addChild(this.sliderGraphics); // Top-level glassmorphic slider overlay
 
     this.aimContainer.addChild(this.aimGraphics);
 
@@ -383,6 +387,67 @@ export class CanvasRenderer {
   }
 
   /**
+   * Renders the dedicated glassmorphic power slider on the left edge of the viewport.
+   * @param {boolean} isDragging True if the user is actively dragging the slider
+   * @param {number} dragRatio Capped pullback ratio between 0.0 and 1.0
+   */
+  drawPowerSlider(isDragging, dragRatio) {
+    this.sliderGraphics.clear();
+
+    const s = this.config.slider;
+    if (!s) return;
+
+    // 1. Sleek Glassmorphic Background Panel
+    this.sliderGraphics.roundRect(s.x, s.y, s.width, s.height, 8);
+    this.sliderGraphics.fill({ color: 0x0f172a, alpha: 0.75 });
+    this.sliderGraphics.stroke({
+      color: isDragging ? 0xffb300 : 0x22355c,
+      width: isDragging ? 2.5 : 1.5,
+      alpha: 0.95
+    });
+
+    // 2. Groove Track Line (centered)
+    const trackWidth = 6;
+    const trackX = s.x + s.width / 2 - trackWidth / 2;
+    const trackY = s.y + 20;
+    const trackHeight = s.height - 40;
+
+    this.sliderGraphics.roundRect(trackX, trackY, trackWidth, trackHeight, 3);
+    this.sliderGraphics.fill({ color: 0x1e293b });
+
+    // 3. Glowing neon power fill (growing down representing pullback)
+    if (dragRatio > 0) {
+      const filledHeight = trackHeight * dragRatio;
+      this.sliderGraphics.roundRect(trackX, trackY, trackWidth, filledHeight, 3);
+      
+      // Cyber glow color gradient
+      let powerColor = 0x00e5ff; // Neon cyan at low power
+      if (dragRatio > 0.5) powerColor = 0xffeb3b; // Yellow at medium power
+      if (dragRatio > 0.85) powerColor = 0xff1744; // Bright neon red at full force
+
+      this.sliderGraphics.fill({ color: powerColor });
+    }
+
+    // 4. Polished Metallic Accent Slider Handle
+    const handleY = trackY + trackHeight * dragRatio;
+    const handleX = s.x + s.width / 2;
+    const handleRadius = 13;
+
+    // Handle soft shadow glow
+    this.sliderGraphics.circle(handleX, handleY, handleRadius + 2.5);
+    this.sliderGraphics.fill({ color: isDragging ? 0xffb300 : 0x00e5ff, alpha: 0.3 });
+
+    // Handle outer metallic border
+    this.sliderGraphics.circle(handleX, handleY, handleRadius);
+    this.sliderGraphics.fill({ color: 0x334155 });
+    this.sliderGraphics.stroke({ color: isDragging ? 0xffb300 : 0x64748b, width: 2 });
+
+    // Handle shiny glossy center core
+    this.sliderGraphics.circle(handleX, handleY, 5.5);
+    this.sliderGraphics.fill({ color: isDragging ? 0xffeb3b : 0xffffff });
+  }
+
+  /**
    * Renders the interactive cue stick stroke dragging and aiming assist laser.
    * Draw the deflection path, deflection target lines and contact ghost ball.
    * @param {Object} aimData Coordinates and paths calculated by controls.js
@@ -390,7 +455,7 @@ export class CanvasRenderer {
   drawAimLine(aimData) {
     this.aimGraphics.clear();
 
-    if (!aimData || !aimData.isAiming) return;
+    if (!aimData) return;
 
     const { startX, startY, strokeDir, dragDist } = aimData;
     const { maxDrag, cue } = this.config.cue;
