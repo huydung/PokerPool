@@ -18,10 +18,11 @@ export class AimingControls {
 
     // Interaction states
     this.isAiming = false;
+    this.isDraggingSlider = false;
     this.startDragPos = { x: 0, y: 0 };
-    this.currentMousePos = { x: 0, y: 0 };
+    this.currentMousePos = { x: 512, y: 338 }; // Centered default
     this.dragDist = 0;
-    this.strokeDir = { x: 0, y: 0 };
+    this.strokeDir = { x: 1, y: 0 }; // Default pointing right
 
     // Active status
     this.enabled = true;
@@ -30,32 +31,33 @@ export class AimingControls {
   }
 
   /**
+   * Helper to check if coordinates are within the vertical slider interaction area (plus buffer padding)
+   * @param {number} x Canvas X coordinate
+   * @param {number} y Canvas Y coordinate
+   * @returns {boolean} True if coordinates are inside the slider bounds
+   */
+  isInsideSlider(x, y) {
+    const s = this.config.slider;
+    if (!s) return false;
+    return (
+      x >= s.x - s.touchBuffer &&
+      x <= s.x + s.width + s.touchBuffer &&
+      y >= s.y - s.touchBuffer &&
+      y <= s.y + s.height + s.touchBuffer
+    );
+  }
+
+  /**
    * Binds mouse and touch events to the canvas.
    */
   initEvents() {
-    // Pointer down (start drag)
+    // Canvas pointerdown (either clicks on the slider or aims on the table)
     this.canvas.addEventListener('pointerdown', (e) => {
       if (!this.enabled || !this.physics.cueBall) return;
 
-      // Get mouse coordinate relative to canvas bounds
-      const rect = this.canvas.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) / rect.width) * this.config.canvas.width;
-      const mouseY = ((e.clientY - rect.top) / rect.height) * this.config.canvas.height;
-
-      // Check if cue ball is stationary before allowing a shot
-      const cueSpeed = Matter.Body.getSpeed(this.physics.cueBall);
-      if (cueSpeed > 0.05) return;
-
-      this.isAiming = true;
-      this.startDragPos = { x: mouseX, y: mouseY };
-      this.currentMousePos = { x: mouseX, y: mouseY };
-      this.dragDist = 0;
-      this.strokeDir = { x: 1, y: 0 }; // Default pointing right
-    });
-
-    // Pointer move (drag in progress)
-    this.canvas.addEventListener('pointermove', (e) => {
-      if (!this.isAiming || !this.physics.cueBall) return;
+      // Check if all balls are stopped before allowing aim adjustments or shots
+      const allStopped = this.physics.areAllBallsStopped();
+      if (!allStopped) return;
 
       const rect = this.canvas.getBoundingClientRect();
       const mouseX = ((e.clientX - rect.left) / rect.width) * this.config.canvas.width;
@@ -63,31 +65,85 @@ export class AimingControls {
 
       this.currentMousePos = { x: mouseX, y: mouseY };
 
-      // Calculate dragging vector (pulling back from starting drag click coordinate)
-      const dx = mouseX - this.startDragPos.x;
-      const dy = mouseY - this.startDragPos.y;
-      
-      this.dragDist = Math.sqrt(dx * dx + dy * dy);
-
-      if (this.dragDist > 0.1) {
-        // Stroke direction is opposite of pulling vector (drag-back mechanics)
-        this.strokeDir = {
-          x: -dx / this.dragDist,
-          y: -dy / this.dragDist
-        };
+      // Case A: Interaction inside the vertical power slider zone
+      if (this.isInsideSlider(mouseX, mouseY)) {
+        this.isDraggingSlider = true;
+        const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
+        this.dragDist = dragRatio * this.config.cue.maxDrag;
+      } else {
+        // Case B: Table tap/drag interaction: adjust aiming rotation immediately
+        this.isDraggingSlider = false;
+        this.isAiming = true; // Flag active pointerdown aiming on table
+        const cueBall = this.physics.cueBall;
+        const dx = mouseX - cueBall.position.x;
+        const dy = mouseY - cueBall.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0.1) {
+          this.strokeDir = {
+            x: dx / dist,
+            y: dy / dist
+          };
+        }
       }
     });
 
-    // Pointer up (release to fire shot)
+    // Canvas pointermove (aim or slide power)
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!this.enabled || !this.physics.cueBall) return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) / rect.width) * this.config.canvas.width;
+      const mouseY = ((e.clientY - rect.top) / rect.height) * this.config.canvas.height;
+
+      this.currentMousePos = { x: mouseX, y: mouseY };
+
+      const allStopped = this.physics.areAllBallsStopped();
+      if (!allStopped) return;
+
+      if (this.isDraggingSlider) {
+        // Sliding: update power based on vertical Y displacement
+        const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
+        this.dragDist = dragRatio * this.config.cue.maxDrag;
+      } else {
+        // Rotating: update vector direction only if pointer is outside the slider zones (avoids sudden angles when aiming/clicking slider)
+        if (!this.isInsideSlider(mouseX, mouseY)) {
+          const cueBall = this.physics.cueBall;
+          const dx = mouseX - cueBall.position.x;
+          const dy = mouseY - cueBall.position.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0.1) {
+            this.strokeDir = {
+              x: dx / dist,
+              y: dy / dist
+            };
+          }
+        }
+      }
+    });
+
+    // Window level pointerup (release to fire shot or cancel)
     window.addEventListener('pointerup', () => {
-      if (!this.isAiming || !this.physics.cueBall) return;
+      this.isAiming = false; // Release table drag flag
 
-      this.isAiming = false;
+      if (!this.enabled || !this.physics.cueBall || !this.isDraggingSlider) {
+        this.isDraggingSlider = false;
+        this.dragDist = 0;
+        return;
+      }
 
-      // Calculate applied force based on pull back distance
+      this.isDraggingSlider = false;
+
+      // Only trigger shot if all balls are stopped
+      const allStopped = this.physics.areAllBallsStopped();
+      if (!allStopped) {
+        this.dragDist = 0;
+        return;
+      }
+
+      // Calculate applied force based on vertical slider pullback
       const cappedDrag = Math.min(this.dragDist, this.config.cue.maxDrag);
       
-      // Only trigger shot if pull back distance is sufficient and NOT canceled (greater than cancelDistance)
+      // Release triggers shot if pullback is greater than cancellation threshold
       if (cappedDrag >= this.config.cue.minDrag && this.dragDist >= this.config.cue.cancelDistance) {
         const forceMagnitude = cappedDrag * this.config.cue.dragScale;
         let forceLimit = this.config.cue.maxForce;
@@ -96,13 +152,16 @@ export class AimingControls {
         }
         const appliedForce = Math.min(forceMagnitude, forceLimit);
 
-        // Apply dynamic linear impulse to cue ball center
-        const forceVector = {
-          x: this.strokeDir.x * appliedForce,
-          y: this.strokeDir.y * appliedForce
+        // Convert the force magnitude to direct velocity vector
+        const cueBall = this.physics.cueBall;
+        const velocityMagnitude = (appliedForce / cueBall.mass) * (1000 / 60);
+
+        const velocityVector = {
+          x: this.strokeDir.x * velocityMagnitude,
+          y: this.strokeDir.y * velocityMagnitude
         };
 
-        this.physics.applyCueStroke(forceVector);
+        this.physics.applyCueStroke(velocityVector);
         
         // Break shot has been completed
         this.physics.isBreakShot = false;
@@ -117,7 +176,14 @@ export class AimingControls {
    * @returns {Object|null} Aiming data or null if not currently aiming
    */
   getAimData() {
-    if (!this.isAiming || !this.physics.cueBall || this.dragDist < this.config.cue.cancelDistance) return null;
+    // Show aiming line automatically if all balls are stopped (pre-shot continuous hover-aiming)
+    const allStopped = this.physics.areAllBallsStopped();
+    if (!allStopped || !this.physics.cueBall) return null;
+
+    // If dragging slider, hide visual guides if drag distance is below cancel threshold (pulling back to cancel)
+    if (this.isDraggingSlider && this.dragDist < this.config.cue.cancelDistance) {
+      return null;
+    }
 
     const cueBall = this.physics.cueBall;
     const startX = cueBall.position.x;
