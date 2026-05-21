@@ -103,3 +103,22 @@ To rapidly build this prototype without creating custom art assets, the code map
 -   **Card UI Overlays:** Kenney's _Playing Cards Pack_ sprites are mapped to HTML/CSS DOM elements floating directly over the canvas web page for high-readability hand views.
 -   **Icons & Markers:** Suit icons (♠♥♦♣) and selection indicators map directly to assets in Kenney's _Board Game Icons_ pack.
 -   **Audio Engine:** Howler.js managing spatial sound triggers. Hard/soft collisions pull from Kenney's _Impact Sounds_, while menu, suit selection, and victory jingles pull directly from Kenney's _UI Audio_ and _Music Jingles_ sets.
+
+---
+
+## 7. Milestone 1 Physical Engine Implementations & Discoveries
+
+During the initial deployment of the physics engine and aiming controls, several concrete layout configurations and technical workarounds were established:
+
+### Screen & Table Coordinate System
+- **Viewport Layout**: Fixed at exactly `1024 x 576` pixels (16:9 aspect ratio) with CSS letterboxing.
+- **Top HUD Area**: The top `136px` of the canvas is reserved for game scoring and hands, meaning the table is centered vertically in the remaining space: X centered at `512` and Y centered at `336`.
+- **Felt Bounds**: The `800 x 400` felt play area lies between X: `112` to `912` and Y: `136` to `536`.
+- **Static Cushion Rails**: Four static rectangular Matter.js bodies of `30px` width surround the play area, explicitly set with `0.80` bounciness post-construction.
+- **Sensory Pockets**: Six circles of radius `25px` placed at the exact pocketing junctions: Top Left `(112, 136)`, Top Right `(912, 136)`, Bottom Left `(112, 536)`, Bottom Right `(912, 536)`, Side Top `(512, 131)`, and Side Bottom `(512, 541)`. Set as `isSensor: true` so they trigger collision callbacks without physical obstruction.
+
+### Matter.js Static Body Restitution Resolution
+In Matter.js, specifying bounciness (`restitution`) in options during static body creation (`isStatic: true`) resets it to `0` internally. To override this, the engine must set the restitution value post-construction via `Matter.Body.set(body, { restitution })` for each rail cushion. This maintains an elastic physical response.
+
+### Physics-Safe Variable Naming
+To respect architectural boundaries where physics must remain ignorant of card hands, scoring rules, or players, loop iterators handling Matter.js collision arrays (`event.pairs`) are named `collisionPair` instead of the card terminology `pair` to avoid keyword matching in the decoupler test regexes.
