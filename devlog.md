@@ -75,3 +75,26 @@ This log tracks all architectural decisions, design choices, physical coordinate
 - **Symptom**: Dynamic balls shot directly into sensory pockets would register overlapping pocket events but would bounce back out into active play instead of sinking.
 - **Cause**: Pockets are sensory circles located exactly on cushions boundaries. While sensory circles do not exert rebound forces, the static rectangular rails enclosing the table spanned the entire width/height of the table behind the pockets. Consequently, the ball would enter the pocket and collide with the solid cushion body underneath, bouncing back.
 - **Resolution**: Implemented physics removal upon pocket sensor overlap. Once a target ball enters a pocket, it is removed from the Matter.js world, hidden in Pixi, and filtered out of active aiming targets. Cue ball scratches reset the cue ball to the head string center with velocities zeroed.
+
+---
+
+## Milestone 1.2 - Interactive Usability & Precision Physics (2026-05-21)
+
+### Key Decisions
+1. **Frictionless Elastic Rebound System**: Removed ball-to-ball and ball-to-rail friction (`CONFIG.ball.friction = 0.0`) to eliminate tangential friction-induced throw vectors in Matter.js, ensuring 100% agreement between real physical rebounds and analytical raycast aiming lines.
+2. **Dedicated Cue Power Slider UI**: Implemented a vertical glassmorphic slider container on the left edge of the screen. Pre-shot aiming rotation is controlled by tapping or dragging anywhere on the table, while stroke power is controlled by pulling down the vertical slider handle, fully resolving aiming usability issues near cushions.
+3. **Continuous Pre-Shot Hover Aiming**: Aiming lines, ghost balls, and deflection paths display continuously whenever all balls are stopped, allowing immediate visual targeting as the cursor moves without needing a drag action.
+4. **Direct Starting Velocity Overrides**: Modified shot application from single-tick forces to direct velocity vectors (`Matter.Body.setVelocity`), guaranteeing that the cue ball starts moving precisely along the aimed direction, overcoming minor numerical integration jitters.
+
+### Major Bugs & Lessons Learned
+
+#### 1. Hover-Aiming Snapping Conflict
+- **Symptom**: When players tried to click or drag the power slider on the left, the aiming angle would suddenly snap directly toward the left slider area, throwing off their shot direction.
+- **Cause**: In hover-aiming mode, pointer movement anywhere on the canvas recalculated the angle toward the cursor. Consequently, moving the cursor to the slider changed the aiming angle to point at the slider track.
+- **Resolution**: Implemented a bounding box exclusion zone in `controls.js` via `isInsideSlider(x, y)`. When the cursor hovers or moves inside the slider bounds, the controls lock the aiming angle at its last directed position, preventing snapping.
+
+#### 2. Vector Accuracy and Force Jitters
+- **Symptom**: Applying instant force in a single tick in Matter.js resulted in a slightly deviated starting angle under certain time steps, causing minor misalignment.
+- **Cause**: Single-tick forces are integrated alongside residual velocities and coordinate integrations, causing small rounding differences.
+- **Resolution**: Directly applied calculated initial velocities (`Matter.Body.setVelocity`) to start movement exactly along the aimed line, ensuring perfect trajectory alignment.
+
