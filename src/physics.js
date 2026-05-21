@@ -24,6 +24,7 @@ export class PhysicsEngine {
     this.pockets = [];
     this.targetBalls = [];
     this.cueBall = null;
+    this.isBreakShot = true;
 
     // Callbacks for hooks
     /** @type {function(Matter.Body, Matter.Body): void} Callback when a ball enters a pocket */
@@ -111,6 +112,8 @@ export class PhysicsEngine {
    * Sets up programmatic racking for 15 target balls and 1 cue ball.
    */
   spawnBalls() {
+    this.isBreakShot = true;
+    
     // Clear any existing ball bodies from the world first
     if (this.cueBall) {
       Matter.Composite.remove(this.world, this.cueBall);
