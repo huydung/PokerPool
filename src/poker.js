@@ -185,14 +185,17 @@ export function evaluatePokerHand(cards) {
 
 /**
  * Compares two 5-card hands and determines the winner based on poker rank, kickers, and standing tiebreakers.
+ * Uses dynamic player names rather than hardcoded strings so config name changes are respected everywhere.
  * @param {Array<Object>} handA Player A's hand
  * @param {Array<Object>} handB Player B's hand
  * @param {string|null} standingPlayer Name of the player who stood (voluntary stand), if any
  * @param {string|null} firstToStand Name of the player who stood first (voluntary stand), if any
  * @param {string|null} firstToCompleteHand Name of the player who reached 5 cards first naturally, if any
+ * @param {string} player1Name Canonical name for Player A (from CONFIG)
+ * @param {string} player2Name Canonical name for Player B (from CONFIG)
  * @returns {Object} { winner: 'A'|'B', labelA: string, labelB: string, reason: string }
  */
-export function compareHands(handA, handB, standingPlayer, firstToStand, firstToCompleteHand) {
+export function compareHands(handA, handB, standingPlayer, firstToStand, firstToCompleteHand, player1Name = 'Alice', player2Name = 'Bob') {
   const evalA = evaluatePokerHand(handA);
   const evalB = evaluatePokerHand(handB);
 
@@ -218,33 +221,21 @@ export function compareHands(handA, handB, standingPlayer, firstToStand, firstTo
   }
 
   // Absolute tie in poker value. Resolve via standing player / first-to priority.
-  // 1. Check if firstToStand stood first
+  // Comparisons use dynamic player name strings so CONFIG.rules.player1Name / player2Name changes
+  // are automatically honoured — no hardcoded 'Alice' / 'Bob' anywhere in this function.
+
+  // 1. Check who stood first (rewarded for strategic pacing per GDD Section 5)
   if (firstToStand) {
-    if (firstToStand === 'Alice') {
-      return { winner: 'A', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Alice stood first" };
-    } else if (firstToStand === 'Bob') {
-      return { winner: 'B', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Bob stood first" };
+    if (firstToStand === player1Name) {
+      return { winner: 'A', labelA: evalA.label, labelB: evalB.label, reason: `Tiebreaker: ${player1Name} stood first` };
+    } else if (firstToStand === player2Name) {
+      return { winner: 'B', labelA: evalA.label, labelB: evalB.label, reason: `Tiebreaker: ${player2Name} stood first` };
     }
   }
 
-  // 2. Check if single standing player exists
+  // 2. Check if a single standing player exists (only one player stood)
   if (standingPlayer) {
-    if (standingPlayer === 'Alice') {
-      return { winner: 'A', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Alice stood first" };
-    } else if (standingPlayer === 'Bob') {
-      return { winner: 'B', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Bob stood first" };
-    }
-  }
-
-  // 3. Fallback: First player to complete their 5-card hand naturally
-  if (firstToCompleteHand) {
-    if (firstToCompleteHand === 'Alice') {
-      return { winner: 'A', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Alice completed hand first" };
-    } else if (firstToCompleteHand === 'Bob') {
-      return { winner: 'B', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Bob completed hand first" };
-    }
-  }
-
-  // 4. Default: Player A (Alice)
-  return { winner: 'A', labelA: evalA.label, labelB: evalB.label, reason: "Tiebreaker: Player 1 standard default" };
-}
+    if (standingPlayer === player1Name) {
+      return { winner: 'A', labelA: evalA.label, labelB: evalB.label, reason: `Tiebreaker: ${player1Name} stood first` };
+    } else if (standingPlayer === player2Name) {
+      return { winner: 'B', labelA: evalA.label, labelB: evalB.label, reason: `Tiebreaker: ${player2Name} stood firs

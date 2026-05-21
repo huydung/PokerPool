@@ -128,6 +128,8 @@ export const CONFIG = {
       headString: 0x64b5f6,
       /** @type {number} Pure white cue ball fill */
       cueBall: 0xffffff,
+      /** @type {number} Default border color for unmapped pockets (generic gray) */
+      pocketBorder: 0x424242,
       
       // Target Balls Colors (Kenney Board Game Palette)
       balls: [
@@ -195,11 +197,4 @@ export const CONFIG = {
       { x: 312, y: 438 },
       { x: 512, y: 270 },
       { x: 512, y: 338 },
-      { x: 512, y: 406 },
-      { x: 712, y: 238 },
-      { x: 712, y: 338 },
-      { x: 712, y: 438 }
-    ]
-  }
-};
-
+  

@@ -240,13 +240,27 @@ export class GameEngine {
 
     if (this.gameEnded) return;
 
-    // Stand countdown decrement — only applies during normal (non-break) shots
+    // Stand countdown decrement — fires once per TURN (not per shot).
+    // A turn ends when the active player changes back to the standing player,
+    // meaning the opponent's uninterrupted run has finished (miss/invalid/scratch).
+    // If the opponent keeps scoring bonus shots, they're still on the same turn and
+    // the countdown doesn't tick down — matching GDD Section 5's "3-turn window."
     if (!this.isBreakShot && this.standingPlayer) {
-      this.standCountdown--;
-      console.log(`Stand countdown: ${this.standCountdown} shots remaining for ${this.activePlayer}.`);
-      if (this.standCountdown <= 0) {
-        this.triggerShowdown();
-        return;
+      // After processNormalPocketedBalls, if activePlayer is now the standing player,
+      // the opponent's turn just ended → decrement the countdown.
+      if (this.activePlayer === this.standingPlayer) {
+        this.standCountdown--;
+        console.log(`Stand countdown: opponent's turn ended. ${this.standCountdown} turn(s) remaining.`);
+        if (this.standCountdown <= 0) {
+          this.triggerShowdown();
+          return;
+        }
+        // Switch active player back to opponent so they can take their next turn
+        const standOpponent = this.standingPlayer === this.player1Name ? this.player2Name : this.player1Name;
+        this.activePlayer = standOpponent;
+      } else {
+        // Opponent kept their turn (bonus shot) — countdown doesn't tick
+        console.log(`Stand countdown: ${this.standCountdown} turn(s) remaining (opponent still shooting).`);
       }
     }
 
@@ -405,31 +419,42 @@ export class GameEngine {
 
     const isOpponentStanding = this.handsStood[opponent];
 
-    // Evaluate turn shifts and misses
+    // ---------------------------------------------------------------
+    // Turn shift & consecutive-miss resolution (GDD Section 4 rules):
+    //
+    //  • Scratch   → always ends turn, always increments miss counter.
+    //  • Valid score only → keep turn (bonus loop), reset miss counter.
+    //  • Valid score + invalid drop → valid score resets miss counter,
+    //    but invalid drop still ends the turn (per GDD "turn shifts
+    //    when a ball drops into an invalid pocket").
+    //  • Invalid drop only → ends turn, increments miss counter.
+    //  • Complete miss (nothing pocketed) → ends turn, increments miss counter.
+    // ---------------------------------------------------------------
     if (this.cueBallScratchThisShot) {
+      // Scratch overrides everything else — miss counter up, turn ends
       this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) {
-        this.activePlayer = opponent;
-      }
-      if (this.controls) {
-        this.controls.hasBallInHand = true;
-      }
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      if (this.controls) this.controls.hasBallInHand = true;
       console.log(`Scratch! Turn transitions to ${this.activePlayer}`);
-    } else if (anyInvalidDrop) {
-      this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) {
-        this.activePlayer = opponent;
-      }
-      console.log(`Invalid Drop occurred! Turn transitions to ${this.activePlayer}`);
-    } else if (anyValidScore) {
+    } else if (anyValidScore && !anyInvalidDrop) {
+      // Clean successful shot: bonus loop, miss counter reset
       this.consecutiveMisses[this.activePlayer] = 0;
       console.log(`${this.activePlayer} scored a card and keeps their turn.`);
-    } else {
-      // Miss
+    } else if (anyValidScore && anyInvalidDrop) {
+      // Mixed shot: scored at least one valid card so miss counter resets,
+      // but also dropped at least one invalid ball so turn ends
+      this.consecutiveMisses[this.activePlayer] = 0;
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      console.log(`${this.activePlayer} had a mixed shot (valid + invalid). Miss counter reset, turn ends.`);
+    } else if (anyInvalidDrop) {
+      // Only invalid drops, no valid score
       this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) {
-        this.activePlayer = opponent;
-      }
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      console.log(`Invalid drop! Turn transitions to ${this.activePlayer}`);
+    } else {
+      // Complete miss — nothing pocketed at all
+      this.consecutiveMisses[this.activePlayer]++;
+      if (!isOpponentStanding) this.activePlayer = opponent;
       console.log(`Miss. Turn transitions to ${this.activePlayer}`);
     }
 
@@ -556,13 +581,10 @@ export class GameEngine {
       this.controls.enabled = false;
       const container = document.getElementById('game-container') || document.body;
 
-      // Merge hands of both players to determine occupied cards in play (strict duplicate prevention)
-      const occupiedCards = [
-        ...(this.hands[this.player1Name] || []),
-        ...(this.hands[this.player2Name] || [])
-      ];
-
-      const isOccupied = (r, s) => occupiedCards.some(c => c.rank === r && c.suit === s);
+      // Per GDD Section 4: duplicate prevention is scoped to the active player's own hand only.
+      // A wildcard may NOT replicate a card the player already holds.
+      const playerHand = this.hands[player] || [];
+      const isOccupied = (r, s) => playerHand.some(c => c.rank === r && c.suit === s);
       const suits = ['S', 'H', 'D', 'C'];
       const allSuitsOccupied = (r) => suits.every(s => isOccupied(r, s));
 
@@ -875,7 +897,7 @@ export class GameEngine {
     const handA = this.hands[this.player1Name] || [];
     const handB = this.hands[this.player2Name] || [];
 
-    const result = compareHands(handA, handB, this.standingPlayer, this.firstToStand, this.firstToCompleteHand);
+    const result = compareHands(handA, handB, this.standingPlayer, this.firstToStand, this.firstToCompleteHand, this.player1Name, this.player2Name);
     
     const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
     const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
@@ -892,46 +914,4 @@ export class GameEngine {
     const details = `
       <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.15); padding-top: 15px; text-align: left; font-family: monospace; font-size: 12px; color: #a0aab8;">
         <div style="margin-bottom: 8px;"><strong style="color: #00e5ff;">Alice's Hand:</strong> ${getHandStr(handA)}<br><span style="color: #64b5f6;">(${result.labelA})</span></div>
-        <div style="margin-bottom: 8px;"><strong style="color: #e040fb;">Bob's Hand:</strong> ${getHandStr(handB)}<br><span style="color: #ba68c8;">(${result.labelB})</span></div>
-        <div style="margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; color: #ffd700; font-weight: bold; text-align: center;">${result.reason}</div>
-      </div>
-    `;
-
-    const winnerName = result.winner === 'A' ? this.player1Name : this.player2Name;
-    
-    this.showGameOver(winnerName, details);
-  }
-
-  /**
-   * Opens static HTML overlay for final Match Over.
-   */
-  showGameOver(winner, reason) {
-    this.controls.enabled = false;
-    const container = document.getElementById('game-container') || document.body;
-    
-    const existing = container.querySelector('.game-over-overlay');
-    if (existing) return;
-
-    const overlay = document.createElement('div');
-    overlay.className = 'game-over-overlay';
-    overlay.style.cssText = `
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(4, 6, 12, 0.95);
-      backdrop-filter: blur(12px);
-      display: flex; justify-content: center; align-items: center;
-      z-index: 3000;
-    `;
-    
-    overlay.innerHTML = `
-      <div style="background: linear-gradient(135deg, #1f112e 0%, #0d0614 100%); border: 3px solid #b388ff; border-radius: 24px; padding: 40px; text-align: center; box-shadow: 0 25px 50px rgba(0,0,0,0.9), 0 0 50px rgba(179,136,255,0.4); max-width: 440px; width: 85%;">
-        <h1 style="color: #b388ff; font-size: 32px; font-weight: 900; margin: 0 0 15px 0; letter-spacing: 5px; text-shadow: 0 0 15px rgba(179,136,255,0.6);">MATCH OVER</h1>
-        <p style="color: #e040fb; font-size: 18px; font-weight: bold; margin: 0 0 10px 0; text-transform: uppercase; text-shadow: 0 0 8px rgba(224,64,251,0.5);">${winner.toUpperCase()} WINS!</p>
-        <p style="color: #90caf9; font-size: 13px; line-height: 1.6; margin: 0 0 30px 0;">${reason}</p>
-        <button onclick="window.location.reload()" style="background: linear-gradient(135deg, #b388ff 0%, #7c4dff 100%); color: white; border: none; border-radius: 12px; padding: 14px 30px; font-size: 14px; font-weight: 800; cursor: pointer; transition: all 0.25s; box-shadow: 0 4px 15px rgba(124,77,255,0.4); letter-spacing: 1px; width: 100%;">PLAY AGAIN</button>
-      </div>
-    `;
-    
-    container.appendChild(overlay);
-  }
-}
+        <div style="margin-bottom: 8px;"><strong style="color: #e040fb;">Bob's Hand:</strong> ${getHandStr(handB)}<br><span style="color: #ba68c8;">(

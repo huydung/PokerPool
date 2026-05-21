@@ -464,6 +464,12 @@ export class AimingControls {
       }
     }
 
+    // targetedPocketId: the pocket index the aimed target ball is heading for.
+    // Computed here so the renderer can optionally show live pocket validity glow
+    // (YELLOW = unclaimed, GREEN = valid card, RED = invalid/duplicate).
+    // NOTE: Dynamic pocket glow is intentionally disabled per current design decision
+    // (GDD Section 4 UI Guideline: "No dynamic glow or color change during aiming").
+    // The value is still returned in aimData for future re-enablement or debugging.
     let targetedPocketId = -1;
     if (closestTarget && minT !== Infinity) {
       hasHit = true;
@@ -472,19 +478,20 @@ export class AimingControls {
         y: startY + D.y * minT
       };
 
-      // Calculate targeting vector to pockets
+      // Project target ball travel vector from ghost ball contact point outward
       const Tx = closestTarget.position.x;
       const Ty = closestTarget.position.y;
       const Gx = ghostCenter.x;
       const Gy = ghostCenter.y;
-      
+
+      // Normal vector from ghost center → target center (direction target ball travels post-collision)
       const Nx = Tx - Gx;
       const Ny = Ty - Gy;
       const dist = Math.sqrt(Nx * Nx + Ny * Ny);
       if (dist > 0.001) {
         const dx = Nx / dist;
         const dy = Ny / dist;
-        
+
         const pocketRadius = this.config.pocket.radius;
         const { xCenter, yCenter, width, height } = this.config.table;
         const { sideOffset } = this.config.pocket;
@@ -498,7 +505,7 @@ export class AimingControls {
           { x: xCenter, y: yCenter - hh - sideOffset }, // 4: ST
           { x: xCenter, y: yCenter + hh + sideOffset }  // 5: SB
         ];
-        
+
         let minProj = Infinity;
         pocketPositions.forEach((pos, idx) => {
           const Vx = pos.x - Tx;
@@ -506,30 +513,4 @@ export class AimingControls {
           const proj = Vx * dx + Vy * dy;
           if (proj > 0) {
             const distSq = (Vx * Vx + Vy * Vy) - proj * proj;
-            if (distSq < pocketRadius * pocketRadius) {
-              if (proj < minProj) {
-                minProj = proj;
-                targetedPocketId = idx;
-              }
-            }
-          }
-        });
-      }
-    }
-
-    return {
-      isAiming: this.isAiming,
-      isLocked: this.isLocked,
-      startX,
-      startY,
-      strokeDir: D,
-      powerRatio: this.powerRatio,
-      hasHit,
-      ghostCenter,
-      targetCenter: closestTarget ? { x: closestTarget.position.x, y: closestTarget.position.y } : null,
-      targetBallId: closestTarget ? closestTarget.plugin.ballId : -1,
-      targetedPocketId
-    };
-  }
-
-}
+            if (distSq 
