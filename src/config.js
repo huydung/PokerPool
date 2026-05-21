@@ -27,7 +27,7 @@ export const CONFIG = {
     /** @type {number} Center coordinate along X-axis */
     xCenter: 512,
     /** @type {number} Center coordinate along Y-axis (offset down to leave room for HUD) */
-    yCenter: 336,
+    yCenter: 338,
     /** @type {number} Thickness of the rails in pixels */
     railWidth: 30,
     /** @type {number} Coefficient of restitution for rails (bounce bounciness, 0 to 1) */
@@ -53,7 +53,7 @@ export const CONFIG = {
   
   ball: {
     /** @type {number} Radius of all pool balls in pixels */
-    radius: 15,
+    radius: 9,
     /** @type {number} Density of the ball body (g/cm^2 scale, higher = heavier/momentum) */
     density: 0.0016,
     /** @type {number} Alias for density parameter to satisfy exact tuning guidelines */
@@ -82,13 +82,21 @@ export const CONFIG = {
   
   cue: {
     /** @type {number} Maximum force applied to the cue ball on a full stroke */
-    maxForce: 0.1,
+    maxForce: 0.5,
     /** @type {number} Drag sensitivity multiplier (scales mouse delta to impulse) */
     dragScale: 0.0008,
     /** @type {number} Minimum drag distance in pixels to register a shot */
-    minDrag: 10,
+    minDrag: 30,
     /** @type {number} Maximum drag distance in pixels to cap shot force */
-    maxDrag: 150
+    maxDrag: 300,
+    /** @type {number} Drag distance below which aiming is canceled and visuals hidden */
+    cancelDistance: 15,
+    /** @type {number} Visual spacing distance between the cue tip and the cue ball */
+    visualOffset: 25,
+    /** @type {number} Additional pullback visual spacing at max power */
+    pullBackDistance: 80,
+    /** @type {number} Maximum force multiplier applied during a break shot */
+    breakForceMultiplier: 2.0
   },
 
   // ==========================================
