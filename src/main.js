@@ -22,6 +22,14 @@ async function initSandbox() {
   const renderer = new CanvasRenderer(container, CONFIG);
   await renderer.init();
 
+  // Set up pocket overlap hook to sync physics with visual views
+  physics.onPocketOverlap = (ball, pocket) => {
+    physics.handlePocketOverlap(ball);
+    if (ball.label !== 'cue_ball') {
+      renderer.setBallVisibility(ball.id, false);
+    }
+  };
+
   // 3. Create the card-overlay ball visual representations
   renderer.createBallViews(physics.cueBall, physics.targetBalls);
 
