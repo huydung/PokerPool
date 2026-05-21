@@ -227,6 +227,24 @@ export class PhysicsEngine {
   }
 
   /**
+   * Handles pocket sensory overlaps: resets the cue ball on scratch or removes target balls.
+   * @param {Matter.Body} ball The dynamic ball body
+   */
+  handlePocketOverlap(ball) {
+    if (ball.label === 'cue_ball') {
+      // Scratch: reset cue ball to head string center
+      const headStringX = this.config.table.xCenter - this.config.table.width / 4;
+      Matter.Body.setPosition(ball, { x: headStringX, y: this.config.table.yCenter });
+      Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(ball, 0);
+    } else {
+      // Target ball pocketed: remove from physical world and active array
+      Matter.Composite.remove(this.world, ball);
+      this.targetBalls = this.targetBalls.filter(b => b.id !== ball.id);
+    }
+  }
+
+  /**
    * Helper to apply an impulse force vector to the cue ball
    * @param {Matter.Vector} force Force vector
    */
