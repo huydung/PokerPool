@@ -239,3 +239,23 @@ Your objective is to complete the game loop by implementing the Stand mechanics,
      * The hand evaluator accurately identifies Straights (including Ace-low wheels), Flushes, and Full Houses.
      * Absolute ties are successfully broken in favor of the player who stood first.
 ```
+
+---
+
+## Appendix: Milestone 1 Realizations & Revisions
+
+During the actual implementation of Milestone 1, the following structural revisions and discoveries were integrated:
+
+### 1. Centralized Configuration Parameter Alignments
+- **Cushion/Rail Restitution**: To support BOTH strict TDD verification (`cushionRestitution`) and the flexible config specifications (`railRestitution`), both parameters are defined inside `src/config.js` under the `table` section.
+- **Ball & Physics Parameters**: Parameters for density (`ballDensity` / `density`), restitution (`ballRestitution` / `restitution`), felt friction (`tableFriction` / `friction`), and maximum speed (`maxBallSpeed` / `maxSpeed`) are fully aliased and JSDoc commented under `ball`. This ensures no magic numbers are read in any module.
+
+### 2. Matter.js Static Body Restitution Realization
+- **Technical Insight**: Setting `restitution` on Matter.js static bodies inside the `Bodies.rectangle` options is overridden and reset to `0` when `isStatic: true` is passed.
+- **Architecture Mandate**: To preserve high-fidelity cushion bounce, static bodies must have their restitution set post-construction using `Matter.Body.set(body, { restitution })`.
+
+### 3. TDD Isolation & Regex Boundary Collisions
+- **Refinement**: Unit tests checking for modular decoupling of scoring logic from physics must not flag normal technical code keywords (such as the standard Matter.js `event.pairs` iterator). Loop variables should be named `collisionPair` rather than the card-hand terminology `pair` to maintain domain purity under automated parsing rules.
+
+### 4. Async/Await Test Assertions
+- **Guideline**: When testing dynamic imports or physics updates with ticking, unit tests must be declared `async` and awaited to ensure Vitest correctly captures assertions and prevents unhandled promise leaks.
