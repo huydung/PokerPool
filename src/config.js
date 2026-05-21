@@ -42,9 +42,9 @@ export const CONFIG = {
   
   pocket: {
     /** @type {number} Radius of the pocket sensors in pixels */
-    radius: 25,
+    radius: 28,
     /** @type {number} Collision buffer/offset to place side pockets slightly outward */
-    sideOffset: 5
+    sideOffset: 19
   },
 
   // ==========================================
@@ -173,5 +173,31 @@ export const CONFIG = {
       /** @type {number} Color when a shot would result in a duplicate/invalid drop */
       invalid: 0xf44336 // Red
     }
+  },
+
+  // ==========================================
+  // GAME RULES & PLAYERS
+  // ==========================================
+  
+  rules: {
+    /** @type {string} Name of Player 1 */
+    player1Name: 'Alice',
+    /** @type {string} Name of Player 2 */
+    player2Name: 'Bob',
+    /** @type {number} Minimum cushion contacts required for a legal break if no ball is pocketed */
+    minBreakCushionContacts: 4,
+    /** @type {Array<{x: number, y: number}>} 9-point respawn matrix coordinates */
+    respawnMatrix: [
+      { x: 312, y: 238 },
+      { x: 312, y: 338 },
+      { x: 312, y: 438 },
+      { x: 512, y: 238 },
+      { x: 512, y: 338 },
+      { x: 512, y: 438 },
+      { x: 712, y: 238 },
+      { x: 712, y: 338 },
+      { x: 712, y: 438 }
+    ]
   }
 };
+

@@ -38,6 +38,9 @@ export class CanvasRenderer {
 
     // Slider overlay graphics
     this.sliderGraphics = new Graphics();
+
+    // Active Player Turn Name tracking
+    this.activePlayerName = this.config.rules?.player1Name || 'Alice';
   }
 
   /**
@@ -188,12 +191,12 @@ export class CanvasRenderer {
       fill: 0x90caf9
     });
 
-    // 1. Player 1 Info Panel (Alice)
+    // 1. Player 1 Info Panel
     const p1Container = new Container();
     p1Container.x = 40;
     p1Container.y = 8;
 
-    const p1Title = new Text({ text: 'SUSAN (PLAYER 1)', style: titleStyle });
+    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'ALICE'} (PLAYER 1)`, style: titleStyle });
     p1Container.addChild(p1Title);
 
     const p1Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
@@ -211,12 +214,12 @@ export class CanvasRenderer {
     }
     this.hudContainer.addChild(p1Container);
 
-    // 2. Player 2 Info Panel (Brian)
+    // 2. Player 2 Info Panel
     const p2Container = new Container();
     p2Container.x = 780;
     p2Container.y = 8;
 
-    const p2Title = new Text({ text: 'BRIAN (PLAYER 2)', style: titleStyle });
+    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'BOB'} (PLAYER 2)`, style: titleStyle });
     p2Container.addChild(p2Title);
 
     const p2Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
@@ -247,7 +250,7 @@ export class CanvasRenderer {
       align: 'center'
     });
 
-    this.activePlayerText = new Text({ text: 'TURN: SUSAN\n(Click & Drag to Aim)', style: activeTurnStyle });
+    this.activePlayerText = new Text({ text: `TURN: ${this.activePlayerName.toUpperCase()}\n(Click & Drag to Aim)`, style: activeTurnStyle });
     this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
     centerContainer.addChild(this.activePlayerText);
 
@@ -386,6 +389,14 @@ export class CanvasRenderer {
     }
   }
 
+  setActivePlayer(name) {
+    this.activePlayerName = name;
+    if (this.activePlayerText) {
+      this.activePlayerText.text = `TURN: ${name.toUpperCase()}\n(Click & Drag to Aim)`;
+      this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
+    }
+  }
+
   /**
    * Renders the dedicated glassmorphic power slider on the left edge of the viewport.
    * @param {boolean} isDragging True if the user is actively dragging the slider
@@ -457,7 +468,7 @@ export class CanvasRenderer {
 
     if (!aimData) {
       if (this.activePlayerText) {
-        this.activePlayerText.text = "TURN: SUSAN\n(Balls Rolling...)";
+        this.activePlayerText.text = `TURN: ${this.activePlayerName.toUpperCase()}\n(Balls Rolling...)`;
         this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
       }
       return;
@@ -471,7 +482,7 @@ export class CanvasRenderer {
       if (isLocked) {
         this.activePlayerText.text = "AIM LOCKED!\n(Drag Slider to Shoot • Click to Unlock)";
       } else {
-        this.activePlayerText.text = "TURN: SUSAN\n(Move Mouse to Aim • Click to Lock)";
+        this.activePlayerText.text = `TURN: ${this.activePlayerName.toUpperCase()}\n(Move Mouse to Aim • Click to Lock)`;
       }
       this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
     }

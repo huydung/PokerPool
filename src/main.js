@@ -3,6 +3,7 @@ import { PhysicsEngine } from './physics.js';
 import { CanvasRenderer } from './renderer.js';
 import { AimingControls } from './controls.js';
 import { CONFIG } from './config.js';
+import { GameEngine } from './game.js';
 
 /**
  * Orchestrates and coordinates the Poker Pool physics sandbox
@@ -18,12 +19,16 @@ async function initSandbox() {
   const physics = new PhysicsEngine(CONFIG);
   physics.spawnBalls();
 
+  // 1b. Create the central game rules orchestrator
+  const game = new GameEngine(CONFIG);
+
   // 2. Initialize the Pixi.js Canvas Renderer
   const renderer = new CanvasRenderer(container, CONFIG);
   await renderer.init();
 
-  // Set up pocket overlap hook to sync physics with visual views
+  // Set up pocket overlap hook to sync physics with visual views and game state rules
   physics.onPocketOverlap = (ball, pocket) => {
+    game.handlePocketOverlap(ball);
     physics.handlePocketOverlap(ball);
     if (ball.label !== 'cue_ball') {
       renderer.setBallVisibility(ball.id, false);
@@ -35,6 +40,11 @@ async function initSandbox() {
 
   // 4. Attach interactive mouse/touch cue aiming controls
   const controls = new AimingControls(renderer.app.canvas, physics, CONFIG);
+
+  // Start the match by triggering the virtual coin toss
+  await game.startMatch(controls, renderer);
+
+  let isShotActive = false;
 
   // 5. Core Game Loop running inside Pixi ticker (synced to display refresh rate)
   renderer.app.ticker.add((ticker) => {
@@ -54,6 +64,16 @@ async function initSandbox() {
 
     // Step D: Render the beautiful glassmorphic power slider on the left edge
     renderer.drawPowerSlider(controls.isDraggingSlider, controls.powerRatio);
+
+    // Step E: Manage shot lifecycle turn-transitions and break evaluations
+    const allStopped = physics.areAllBallsStopped();
+    if (!isShotActive && !allStopped) {
+      isShotActive = true;
+      game.handleShotStart();
+    } else if (isShotActive && allStopped) {
+      isShotActive = false;
+      game.handleShotEnd(physics);
+    }
   });
 
   console.log('Poker Pool Sandbox Initialized successfully');

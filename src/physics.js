@@ -23,8 +23,10 @@ export class PhysicsEngine {
     this.cushions = [];
     this.pockets = [];
     this.targetBalls = [];
+    this.allTargetBalls = [];
     this.cueBall = null;
     this.isBreakShot = true;
+    this.cushionContactSet = new Set(); // Track which target balls contact cushions during a shot
 
     // Callbacks for hooks
     /** @type {function(Matter.Body, Matter.Body): void} Callback when a ball enters a pocket */
@@ -113,6 +115,7 @@ export class PhysicsEngine {
    */
   spawnBalls() {
     this.isBreakShot = true;
+    this.cushionContactSet.clear();
     
     // Clear any existing ball bodies from the world first
     if (this.cueBall) {
@@ -120,6 +123,7 @@ export class PhysicsEngine {
     }
     this.targetBalls.forEach(ball => Matter.Composite.remove(this.world, ball));
     this.targetBalls = [];
+    this.allTargetBalls = [];
 
     const { xCenter, yCenter, width } = this.config.table;
     const { radius, density, restitution, friction, frictionAir } = this.config.ball;
@@ -141,12 +145,41 @@ export class PhysicsEngine {
     });
     Matter.Composite.add(this.world, this.cueBall);
 
-    // Spawn 15 Target Balls racked in a standard triangle facing left
     // Racking apex starts at the foot spot (1/4 table width from right)
     const footSpotX = xCenter + width / 4;
     const rowOffset = radius * Math.sqrt(3); // Triangle row spacing offset
 
-    let ballIndex = 1;
+    // Deterministic Protected Rack setup:
+    // High-value balls Ace (1), Jack (11), Queen (12), King (13) must sit at indices 5, 6, 7, 8 of the triangle rack
+    const highValues = [1, 11, 12, 13];
+    // Shuffle the high values
+    for (let i = highValues.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [highValues[i], highValues[j]] = [highValues[j], highValues[i]];
+    }
+
+    // Other balls (2-10, 14, 15)
+    const otherValues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15];
+    // Shuffle the other values
+    for (let i = otherValues.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [otherValues[i], otherValues[j]] = [otherValues[j], otherValues[i]];
+    }
+
+    // Map all 15 positions deterministically
+    const ballIds = new Array(15);
+    ballIds[5] = highValues[0];
+    ballIds[6] = highValues[1];
+    ballIds[7] = highValues[2];
+    ballIds[8] = highValues[3];
+
+    let otherIdx = 0;
+    for (let i = 0; i < 15; i++) {
+      if (i >= 5 && i <= 8) continue;
+      ballIds[i] = otherValues[otherIdx++];
+    }
+
+    let ballIndex = 0;
     // 5 Rows in triangle rack
     for (let row = 0; row < 5; row++) {
       // Calculate X coordinate for this row (increasing as we move right)
@@ -160,11 +193,12 @@ export class PhysicsEngine {
         const targetBall = Matter.Bodies.circle(x, y, radius, {
           ...ballOptions,
           plugin: {
-            ballId: ballIndex // Custom numerical identity slot (1-15)
+            ballId: ballIds[ballIndex] // Custom numerical identity slot (1-15)
           }
         });
         
         this.targetBalls.push(targetBall);
+        this.allTargetBalls.push(targetBall);
         ballIndex++;
       }
     }
@@ -179,6 +213,13 @@ export class PhysicsEngine {
     Matter.Events.on(this.engine, 'collisionStart', (event) => {
       event.pairs.forEach((collisionPair) => {
         const { bodyA, bodyB } = collisionPair;
+
+        // Track cushion contacts during a shot
+        if (bodyA.label === 'cushion' && bodyB.label === 'ball') {
+          this.cushionContactSet.add(bodyB.plugin.ballId);
+        } else if (bodyB.label === 'cushion' && bodyA.label === 'ball') {
+          this.cushionContactSet.add(bodyA.plugin.ballId);
+        }
 
         // Check for Ball overlapping Pockets
         if (bodyA.label === 'pocket' && (bodyB.label === 'ball' || bodyB.label === 'cue_ball')) {
@@ -274,7 +315,64 @@ export class PhysicsEngine {
    */
   applyCueStroke(velocity) {
     if (!this.cueBall) return;
+    this.cushionContactSet.clear(); // Reset cushion touches when a new shot starts
     // Overrides any residual velocities and guarantees 100% directional accuracy
     Matter.Body.setVelocity(this.cueBall, velocity);
+  }
+
+  /**
+   * Safe-Haven Break / Invalid Pocket Respawn:
+   * Teleports a pocketed target ball to the first unoccupied coordinate in the 9-point respawn matrix.
+   * @param {Matter.Body} ball The pocketed ball body
+   */
+  respawnBall(ball) {
+    // If the ball was removed from the world composite on pocket overlap, restore it
+    if (!this.targetBalls.some(b => b.id === ball.id)) {
+      this.targetBalls.push(ball);
+      Matter.Composite.add(this.world, ball);
+    }
+
+    const matrix = this.config.rules.respawnMatrix;
+    const radius = this.config.ball.radius;
+    let freeSpot = null;
+
+    for (const spot of matrix) {
+      let isBlocked = false;
+      
+      // Check cue ball
+      if (this.cueBall) {
+        const dx = this.cueBall.position.x - spot.x;
+        const dy = this.cueBall.position.y - spot.y;
+        if (Math.sqrt(dx * dx + dy * dy) < radius * 3) {
+          isBlocked = true;
+        }
+      }
+      
+      // Check all active target balls (except itself)
+      for (const target of this.targetBalls) {
+        if (target.id === ball.id) continue;
+        const dx = target.position.x - spot.x;
+        const dy = target.position.y - spot.y;
+        if (Math.sqrt(dx * dx + dy * dy) < radius * 3) {
+          isBlocked = true;
+          break;
+        }
+      }
+      
+      if (!isBlocked) {
+        freeSpot = spot;
+        break;
+      }
+    }
+
+    // Fallback to first spot if all spots are blocked
+    if (!freeSpot) {
+      freeSpot = matrix[0];
+    }
+
+    // Teleport the ball to the spot, set velocity to zero
+    Matter.Body.setPosition(ball, { x: freeSpot.x, y: freeSpot.y });
+    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setAngularVelocity(ball, 0);
   }
 }
