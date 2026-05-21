@@ -161,7 +161,7 @@ export class CanvasRenderer {
    * Draws the top HUD interface displaying scores, hands, and current turn indicators.
    */
   drawHUDLayout() {
-    const hudHeight = 136;
+    const hudHeight = 100;
     
     // Draw background glassmorphism panel
     const bg = new Graphics();
@@ -172,7 +172,7 @@ export class CanvasRenderer {
 
     const titleStyle = new TextStyle({
       fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 20,
+      fontSize: 15,
       fontWeight: 'bold',
       fill: 0xffffff,
       letterSpacing: 2
@@ -180,26 +180,26 @@ export class CanvasRenderer {
 
     const infoStyle = new TextStyle({
       fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 13,
+      fontSize: 11,
       fill: 0x90caf9
     });
 
     // 1. Player 1 Info Panel (Alice)
     const p1Container = new Container();
     p1Container.x = 40;
-    p1Container.y = 15;
+    p1Container.y = 8;
 
     const p1Title = new Text({ text: 'SUSAN (PLAYER 1)', style: titleStyle });
     p1Container.addChild(p1Title);
 
     const p1Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
-    p1Score.y = 28;
+    p1Score.y = 20;
     p1Container.addChild(p1Score);
 
     // Render 5 empty card slot outlines for Player 1
     for (let i = 0; i < 5; i++) {
       const cardSlot = new Graphics();
-      cardSlot.roundRect(i * 45, 52, 38, 54, 4);
+      cardSlot.roundRect(i * 40, 42, 32, 46, 4);
       cardSlot.fill({ color: 0x0b0f19, alpha: 0.6 });
       cardSlot.stroke({ color: 0x213359, width: 1.5 });
       p1Container.addChild(cardSlot);
@@ -209,20 +209,20 @@ export class CanvasRenderer {
 
     // 2. Player 2 Info Panel (Brian)
     const p2Container = new Container();
-    p2Container.x = 660;
-    p2Container.y = 15;
+    p2Container.x = 780;
+    p2Container.y = 8;
 
     const p2Title = new Text({ text: 'BRIAN (PLAYER 2)', style: titleStyle });
     p2Container.addChild(p2Title);
 
     const p2Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
-    p2Score.y = 28;
+    p2Score.y = 20;
     p2Container.addChild(p2Score);
 
     // Render 5 empty card slot outlines for Player 2
     for (let i = 0; i < 5; i++) {
       const cardSlot = new Graphics();
-      cardSlot.roundRect(i * 45, 52, 38, 54, 4);
+      cardSlot.roundRect(i * 40, 42, 32, 46, 4);
       cardSlot.fill({ color: 0x0b0f19, alpha: 0.6 });
       cardSlot.stroke({ color: 0x213359, width: 1.5 });
       p2Container.addChild(cardSlot);
@@ -233,11 +233,11 @@ export class CanvasRenderer {
     // 3. Center Status Panel (Turn indicator)
     const centerContainer = new Container();
     centerContainer.x = 440;
-    centerContainer.y = 20;
+    centerContainer.y = 10;
 
     const activeTurnStyle = new TextStyle({
       fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 16,
+      fontSize: 13,
       fontWeight: 'bold',
       fill: 0xffb300,
       align: 'center'
@@ -248,19 +248,19 @@ export class CanvasRenderer {
     centerContainer.addChild(this.activePlayerText);
 
     const separator = new Graphics();
-    separator.roundRect(30, 60, 84, 28, 4);
+    separator.roundRect(36, 50, 72, 24, 4);
     separator.fill({ color: 0xffb300, alpha: 0.1 });
     separator.stroke({ color: 0xffb300, width: 1.5 });
     
     const vsStyle = new TextStyle({
       fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 12,
+      fontSize: 10,
       fontWeight: 'bold',
       fill: 0xffb300
     });
     const vsText = new Text({ text: 'SANDBOX', style: vsStyle });
     vsText.x = 72 - vsText.width / 2;
-    vsText.y = 66;
+    vsText.y = 54;
     centerContainer.addChild(separator, vsText);
 
     this.hudContainer.addChild(centerContainer);
@@ -289,10 +289,10 @@ export class CanvasRenderer {
       if (isWildcard) {
         // Metallic Gold Gradient feel
         base.fill({ color: 0xffd700 });
-        base.stroke({ color: 0xb58e3d, width: 1.5 });
       } else {
         base.fill({ color: color });
       }
+      base.stroke({ color: 0x000000, width: 1.5 }); // Distinct black outline around all balls
       container.addChild(base);
 
       // Inner glossy shine overlay
@@ -399,7 +399,9 @@ export class CanvasRenderer {
     // A. Draw the solid interactive cue stick pointing towards the cue ball
     // Extended backward opposite of aim direction
     const dragRatio = Math.min(dragDist / maxDrag, 1.0);
-    const cueOffset = 25 + dragRatio * 40; // Pull-back effect distance
+    const visualOffset = this.config.cue.visualOffset ?? 25;
+    const pullBackDistance = this.config.cue.pullBackDistance ?? 80;
+    const cueOffset = visualOffset + dragRatio * pullBackDistance; // Dynamic custom pull-back effect distance
     const cueLength = 260;
 
     const stickX = startX - strokeDir.x * cueOffset;
@@ -429,10 +431,10 @@ export class CanvasRenderer {
 
     // B. Draw Shot Power Bar underneath the HUD
     const strokeForceRatio = Math.min(dragDist / maxDrag, 1.0);
-    this.aimGraphics.rect(20, 145, 1024 - 40, 6);
+    this.aimGraphics.rect(20, 105, 1024 - 40, 6);
     this.aimGraphics.fill({ color: 0x1c2b42 });
     
-    this.aimGraphics.rect(20, 145, (1024 - 40) * strokeForceRatio, 6);
+    this.aimGraphics.rect(20, 105, (1024 - 40) * strokeForceRatio, 6);
     // Green -> Yellow -> Red power gradient coloring
     let powerColor = 0x4caf50;
     if (strokeForceRatio > 0.5) powerColor = 0xffeb3b;
@@ -440,8 +442,8 @@ export class CanvasRenderer {
     this.aimGraphics.fill({ color: powerColor });
 
     // C. Draw Aiming Laser Assist paths if raycast hit is registered
-    if (aimData.hasHit && aimData.hitPoint) {
-      const { hitPoint, ghostCenter, targetDeflect, cueDeflect } = aimData;
+    if (aimData.hasHit && aimData.ghostCenter) {
+      const { ghostCenter, targetCenter, targetDeflect, cueDeflect } = aimData;
 
       // 1. Draw dashed line from cue ball center to the ghost ball position
       this.drawDashedLine(
@@ -458,18 +460,18 @@ export class CanvasRenderer {
         alpha: visuals.ghostAlpha
       });
 
-      // 3. Draw dashed line for target ball projected deflection direction
-      if (targetDeflect) {
-        const targetEndX = ghostCenter.x + targetDeflect.x * 120;
-        const targetEndY = ghostCenter.y + targetDeflect.y * 120;
+      // 3. Draw dashed line for target ball projected deflection direction (starting from target ball center)
+      if (targetDeflect && targetCenter) {
+        const targetEndX = targetCenter.x + targetDeflect.x * 120;
+        const targetEndY = targetCenter.y + targetDeflect.y * 120;
         this.drawDashedLine(
-          ghostCenter.x, ghostCenter.y,
+          targetCenter.x, targetCenter.y,
           targetEndX, targetEndY,
           visuals.targetDeflectColor, 2, 8, 5, 0.9
         );
       }
 
-      // 4. Draw dashed line for cue ball projected deflection direction
+      // 4. Draw dashed line for cue ball projected deflection direction (starting from ghost contact center)
       if (cueDeflect) {
         const cueEndX = ghostCenter.x + cueDeflect.x * 90;
         const cueEndY = ghostCenter.y + cueDeflect.y * 90;
