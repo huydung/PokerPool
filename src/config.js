@@ -53,7 +53,7 @@ export const CONFIG = {
   
   ball: {
     /** @type {number} Radius of all pool balls in pixels */
-    radius: 9,
+    radius: 10,
     /** @type {number} Density of the ball body (g/cm^2 scale, higher = heavier/momentum) */
     density: 0.0016,
     /** @type {number} Alias for density parameter to satisfy exact tuning guidelines */
@@ -63,9 +63,9 @@ export const CONFIG = {
     /** @type {number} Alias for restitution bounciness to satisfy exact tuning guidelines */
     ballRestitution: 0.95,
     /** @type {number} Surface sliding friction coefficient (table felt resistance) */
-    friction: 0.015,
+    friction: 0.0,
     /** @type {number} Alias for surface felt sliding friction to satisfy tuning guidelines */
-    tableFriction: 0.015,
+    tableFriction: 0.0,
     /** @type {number} Air resistance / damping coefficient (slows balls down naturally) */
     frictionAir: 0.012,
     /** @type {number} Maximum speed a ball can travel (clamp to prevent tunneling / high-speed glitches) */
@@ -97,6 +97,23 @@ export const CONFIG = {
     pullBackDistance: 80,
     /** @type {number} Maximum force multiplier applied during a break shot */
     breakForceMultiplier: 2.0
+  },
+
+  // ==========================================
+  // DEDICATED CUE POWER SLIDER DIMENSIONS
+  // ==========================================
+
+  slider: {
+    /** @type {number} X position on canvas (left edge layout space) */
+    x: 22,
+    /** @type {number} Y starting position on canvas (aligned with active felt Y) */
+    y: 138,
+    /** @type {number} Width of the slider background panel */
+    width: 38,
+    /** @type {number} Height of the slider background panel */
+    height: 400,
+    /** @type {number} Pointer interaction touch padding buffer */
+    touchBuffer: 20
   },
 
   // ==========================================
