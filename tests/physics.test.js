@@ -112,4 +112,32 @@ describe('Poker Pool - Physics Sandbox TDD Suite', () => {
       expect(containsKeyword).toBe(false);
     });
   });
+
+  // ========================================================
+  // 4. POCKET OVERLAP & SINKING BEHAVIOR
+  // ========================================================
+  it('should reset cue ball on scratch and remove target balls from physics world', () => {
+    const engine = new PhysicsEngine(CONFIG);
+    engine.spawnBalls();
+
+    const cueBall = engine.cueBall;
+    const targetBall = engine.targetBalls[0];
+
+    // Trigger pocket overlap for cue ball (scratch)
+    engine.handlePocketOverlap(cueBall);
+
+    // Verify cue ball is repositioned at the head string center
+    const expectedHeadStringX = CONFIG.table.xCenter - CONFIG.table.width / 4;
+    expect(cueBall.position.x).toBeCloseTo(expectedHeadStringX, 1);
+    expect(cueBall.position.y).toBeCloseTo(CONFIG.table.yCenter, 1);
+    expect(cueBall.velocity.x).toBe(0);
+    expect(cueBall.velocity.y).toBe(0);
+
+    // Trigger pocket overlap for target ball
+    const targetId = targetBall.id;
+    engine.handlePocketOverlap(targetBall);
+
+    // Verify target ball is removed from active targetBalls array
+    expect(engine.targetBalls.some(b => b.id === targetId)).toBe(false);
+  });
 });
