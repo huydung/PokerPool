@@ -60,9 +60,13 @@ When a ball drops into an active pocket, its programmatic identity is instantly 
 | **Wildcard Ball (14-15)** | Active Suit Pocket | **Invalid.** Ball immediately teleports to a respawn spot. Turn ends (counts as a miss). |
 | **Wildcard Ball (14-15)** | Active Wild Pocket | Open rank selector UI (A–K) and suit selector → Add custom card → **Permanently remove ball from play (no respawn).** |
 
-### Live Aiming Assist (UI Guideline)
+### Live Aiming Assist & Screen Layout (UI Guideline)
 
-To maximize tactical transparency, when a player aims the cue stick at a ball, the engine runs a real-time check against the player's active hand. Pockets glow **Green** if the ball will successfully score a card, **Yellow** if the pocket is unclaimed, and **Red** if the shot will cause an invalid drop/respawn due to duplication or type mismatches.
+- **Canvas Scale & Aspect Ratio**: The application is built on a fixed **1024 x 576** canvas size (16:9 aspect ratio) with responsive letterboxing (black bars surrounding the canvas on non-16:9 screens) to ensure physics coordinates remain fully deterministic across all displays.
+- **Table Aesthetics**: Styled as a sleek blue felt table with elegant wooden rail borders, matching `gameref.png`.
+- **Advanced Raycast Aiming**: When aiming the cue stick at a target ball, the engine runs a real-time ray-cast. It projects a path from the cue ball, placing a **ghost cue ball** at the exact predicted point of contact with the target ball.
+- **Deflection Lines**: Displays a projected target ball deflection path extending along the normal vector between the ghost cue ball and target ball centers, and a perpendicular cue ball deflection path.
+- **Pocket Glow Indicators**: Pockets glow **Green** if pocketing the targeted ball registers a valid new card in the active player's hand, **Yellow** if the pocket is unclaimed/unmapped (Phase 1), and **Red** if pocketing is invalid (causes duplication, standard ball in wild pocket, etc.).
 
 ### Hand Swapping (The 5-Card Cap)
 

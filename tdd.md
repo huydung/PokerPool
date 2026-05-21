@@ -77,9 +77,12 @@ Your objective is to implement the Core Physics & Interactive Aiming Sandbox usi
 1. CONFIGURATION:
    - Create a centralized config file (e.g., 'src/config.js') as defined in Section 1.1 of 'tdd.md'.
    - Include customizable values for timeScale, tableFriction, railRestitution, ballRestitution, ballDensity, maxBallSpeed, and visual configurations. Add detailed JSDoc comments to every parameter.
+   - Mandate fixed screen size settings (1024 x 576 canvas size) to make physics fully deterministic.
 
-2. PHYSICAL LAYOUT:
+2. PHYSICAL LAYOUT & STYLING:
    - Construct a standard 2:1 billiards table layout bounded by solid Matter.js static bodies representing the cushions/rails.
+   - Render a high-fidelity blue felt layout centered in the lower portion of the screen, leaving the top 136px for the HUD area, styled as closely as possible to the blue table theme in 'gameref.png'.
+   - Use CSS aspect-ratio properties and scaling transformations to fit the 1024 x 576 canvas responsively to the viewport, implementing letterboxing (black bars) on non-16:9 displays.
    - Place 6 open sensory pockets (4 corners, 2 center side-rails). Pockets should register overlapping collision events without exerting physical rebound forces on the balls.
 
 3. BALL ENTITIES:
@@ -87,8 +90,10 @@ Your objective is to implement the Core Physics & Interactive Aiming Sandbox usi
    - For rendering, programmatically overlay text characters (A, 2-10, J, Q, K, and '★' stars on balls 14-15) directly onto the circular textures so they read as cards. Keep them on separate visual Pixi.js containers.
 
 4. CUE CONTROLS & AIM LINE:
-   - Build an interactive aiming line (laser assist) originating from the cue ball, projecting outward in the opposite direction of dragging.
-   - The aim line must ray-cast to show the collision point on the first targeted ball.
+   - Build an interactive aiming line (laser assist) originating from the cue ball, projecting outward in the opposite direction of dragging (pulling back from the cue ball).
+   - Use Matter.js raycasting to detect the first target ball collision point.
+   - Render a ghost cue ball centered at the point of contact.
+   - From the ghost ball position, project the target ball's deflection vector (along the normal between centers) and the cue ball's deflection vector (perpendicular to the normal) using dashed aiming assist lines matching the style of 'gameref.png'.
    - Allow setting shot power based on mouse/touch drag distance, up to the maximum shot force configured in 'src/config.js'.
    - On release, apply an impulse force to the cue ball using Matter.js.
 
