@@ -51,6 +51,10 @@ async function initSandbox() {
     // Step C: Calculate and render the aiming laser lines & deflection paths
     const aimData = controls.getAimData();
     renderer.drawAimLine(aimData);
+
+    // Step D: Render the beautiful glassmorphic power slider on the left edge
+    const maxDrag = CONFIG.cue.maxDrag || 300;
+    renderer.drawPowerSlider(controls.isDraggingSlider, controls.dragDist / maxDrag);
   });
 
   console.log('Poker Pool Sandbox Initialized successfully');
