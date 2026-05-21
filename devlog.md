@@ -53,3 +53,25 @@ This log tracks all architectural decisions, design choices, physical coordinate
 
 ---
 
+
+## Milestone 1.1 - Physics, Controls, and Rendering Improvements (2026-05-21)
+
+### Key Decisions
+1. **Scaled Glassmorphic HUD**: Reduced the HUD height to `100px` and table `yCenter` to `338px`, introducing an `8px` gap that completely prevents cushions and pockets overlap.
+2. **Tournament-accurate Proportions**: Configured ball radius to `9px` (diameter `18px`), satisfying standard proportions of a `2¼"` ball on a `100"` table (mapped to `800px` play area).
+3. **High-Fidelity Deflection Projection**: Fixed the aiming assist by resolving the missing `hitPoint` key (replaced with `ghostCenter` verification). Target deflection vectors are projected starting from `targetCenter` (the target ball's center at contact) instead of the contact point, creating a realistic separable visual.
+4. **Drag-to-Cancel aiming**: Suspends the aiming visual and stroke when the pointer is dragged within `15px` of the origin, giving players a clean way to abort a stroke.
+5. **Dynamic Break Force Multiplier**: Enabled a racked break shot multiplier (`2.0x` power limit) that is consumed upon the first stroke, giving the racked table a highly satisfying break impact.
+6. **Decoupled Pocket Sinking**: Integrated the sensory `onPocketOverlap` callback to cleanly remove pocketed target balls from the physical world and hide them visually, preventing any bounce-back from static rails behind the pocket sensor.
+
+### Major Bugs & Lessons Learned
+
+#### 1. Aiming Laser Assist Black Hole
+- **Symptom**: The interactive aiming stick worked, but the ghost ball, target deflection line, and cue deflection lines were never drawn; only a straight infinite laser ray was rendered passing through target balls.
+- **Cause**: In `renderer.js`, the laser assist branch was conditionally gated on `if (aimData.hasHit && aimData.hitPoint)`. However, `getAimData()` in `controls.js` returned `ghostCenter`, `targetDeflect`, and `cueDeflect` but *never* defined or returned a `hitPoint` property.
+- **Resolution**: Refactored the renderer to check for `aimData.hasHit && aimData.ghostCenter`. Added the new `targetCenter` coordinate in controls and used it in the renderer to project trajectories from their correct physical origins.
+
+#### 2. Ball Pocket Bounce-Back
+- **Symptom**: Dynamic balls shot directly into sensory pockets would register overlapping pocket events but would bounce back out into active play instead of sinking.
+- **Cause**: Pockets are sensory circles located exactly on cushions boundaries. While sensory circles do not exert rebound forces, the static rectangular rails enclosing the table spanned the entire width/height of the table behind the pockets. Consequently, the ball would enter the pocket and collide with the solid cushion body underneath, bouncing back.
+- **Resolution**: Implemented physics removal upon pocket sensor overlap. Once a target ball enters a pocket, it is removed from the Matter.js world, hidden in Pixi, and filtered out of active aiming targets. Cue ball scratches reset the cue ball to the head string center with velocities zeroed.
