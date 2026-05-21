@@ -196,14 +196,6 @@ export class GameEngine {
         // Pass turn to opponent with Ball-In-Hand behind head string (kitchen)
         this.activePlayer = opponent;
         
-        // Reset cue ball position to head string center behind kitchen bounds
-        if (physics.cueBall) {
-          const headStringX = this.config.table.xCenter - this.config.table.width / 4;
-          Matter.Body.setPosition(physics.cueBall, { x: headStringX, y: this.config.table.yCenter });
-          Matter.Body.setVelocity(physics.cueBall, { x: 0, y: 0 });
-          Matter.Body.setAngularVelocity(physics.cueBall, 0);
-        }
-
         console.log(`Illegal break or scratch. Turn passes to ${this.activePlayer} with Ball-in-Hand.`);
       }
 

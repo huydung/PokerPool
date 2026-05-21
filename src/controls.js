@@ -299,100 +299,133 @@ export class AimingControls {
 
     let hasHit = false;
     let closestTarget = null;
-    let closestT = Infinity; // Distance to intersection point
     let ghostCenter = null;
     let targetDeflect = null;
     let cueDeflect = null;
 
-    // Filter target balls that are active
+    // 1. Create a lightweight temporary Matter.js engine and world
+    const tempEngine = Matter.Engine.create({ gravity: { x: 0, y: 0 } });
+    const tempWorld = tempEngine.world;
+
+    // 2. Clone cue ball at its current coordinates
+    const tempCueBall = Matter.Bodies.circle(startX, startY, R, {
+      density: cueBall.density,
+      restitution: cueBall.restitution,
+      friction: cueBall.friction,
+      frictionStatic: cueBall.frictionStatic,
+      frictionAir: cueBall.frictionAir
+    });
+    Matter.Composite.add(tempWorld, tempCueBall);
+
+    // 3. Clone all active target balls at their current coordinates
     const activeTargets = this.physics.targetBalls;
-
-    // Loop through all active target balls to check analytical quadratic overlap
-    activeTargets.forEach((target) => {
-      const T = target.position;
-      
-      // Vector V = CueBallPos - TargetBallPos
-      const Vx = startX - T.x;
-      const Vy = startY - T.y;
-
-      // Dot product V . D (strokeDir)
-      const dotVD = Vx * this.strokeDir.x + Vy * this.strokeDir.y;
-
-      // Quadratic coefficient c = V^2 - (2R)^2
-      const VSq = Vx * Vx + Vy * Vy;
-      const c = VSq - 4 * R * R;
-
-      // Discriminant d = b^2 - 4ac (where a = 1, since strokeDir is normalized)
-      // Since b = 2 * (V . D), b^2 - 4c = 4*(V.D)^2 - 4*(V^2 - 4R^2)
-      const d = 4 * (dotVD * dotVD) - 4 * c;
-
-      if (d >= 0) {
-        // Compute the two roots
-        const t1 = (-2 * dotVD - Math.sqrt(d)) / 2;
-        const t2 = (-2 * dotVD + Math.sqrt(d)) / 2;
-
-        // We want the smallest positive root (meaning the ball is ahead of the cue ball path)
-        let t = -1;
-        if (t1 > 0.01 && t2 > 0.01) {
-          t = Math.min(t1, t2);
-        } else if (t1 > 0.01) {
-          t = t1;
-        } else if (t2 > 0.01) {
-          t = t2;
-        }
-
-        // Keep track of the closest intersected target ball
-        if (t > 0.01 && t < closestT) {
-          closestT = t;
-          closestTarget = target;
-          hasHit = true;
-        }
-      }
+    const tempTargetBalls = activeTargets.map(target => {
+      const tempTarget = Matter.Bodies.circle(target.position.x, target.position.y, R, {
+        density: target.density,
+        restitution: target.restitution,
+        friction: target.friction,
+        frictionStatic: target.frictionStatic,
+        frictionAir: target.frictionAir
+      });
+      tempTarget.plugin = { ballId: target.plugin.ballId };
+      Matter.Composite.add(tempWorld, tempTarget);
+      return tempTarget;
     });
 
-    if (hasHit && closestTarget) {
-      // 1. Position of the cue ball center at the moment of contact
-      ghostCenter = {
-        x: startX + this.strokeDir.x * closestT,
-        y: startY + this.strokeDir.y * closestT
-      };
+    // 4. Calculate shot velocity at exactly 70% force (powerRatio = 0.7)
+    const simulatePowerRatio = 0.7;
+    const maxNormalSpeed = this.config.ball.maxSpeed / 2;
+    const maxShotSpeed = this.physics.isBreakShot ? this.config.ball.maxSpeed : maxNormalSpeed;
+    const minShotSpeed = 0.8;
+    const velocityMagnitude = minShotSpeed + simulatePowerRatio * (maxShotSpeed - minShotSpeed);
+    const velocityVector = {
+      x: this.strokeDir.x * velocityMagnitude,
+      y: this.strokeDir.y * velocityMagnitude
+    };
 
-      // 2. Projected target ball deflection direction (along the normal of centers)
-      const Tx = closestTarget.position.x;
-      const Ty = closestTarget.position.y;
+    Matter.Body.setVelocity(tempCueBall, velocityVector);
+
+    // 5. Run simulation loop to detect the first collision
+    let collisionOccurred = false;
+    let hitTempTarget = null;
+    const maxSteps = 300; // safety ceiling
+    const dt = 16.666;
+    const subSteps = 10;
+    const subDt = dt / subSteps;
+
+    for (let step = 0; step < maxSteps; step++) {
+      // Step the virtual physics engine frame (using identical high-precision 10 sub-stepping parameters)
+      for (let s = 0; s < subSteps; s++) {
+        Matter.Engine.update(tempEngine, subDt);
+      }
+
+      // Check for collisions between cue ball and target balls
+      const collisions = Matter.Query.collides(tempCueBall, tempTargetBalls);
+      if (collisions.length > 0) {
+        collisionOccurred = true;
+        const col = collisions[0];
+        hitTempTarget = col.bodyA === tempCueBall ? col.bodyB : col.bodyA;
+        break;
+      }
+    }
+
+    // 6. If collision occurred, resolve exact deflection vectors
+    if (collisionOccurred && hitTempTarget) {
+      hasHit = true;
       
-      const normX = Tx - ghostCenter.x;
-      const normY = Ty - ghostCenter.y;
-      const normDist = Math.sqrt(normX * normX + normY * normY);
+      // Find the corresponding target ball in the active list
+      closestTarget = activeTargets.find(t => t.plugin.ballId === hitTempTarget.plugin.ballId);
 
-      if (normDist > 0.1) {
-        targetDeflect = {
-          x: normX / normDist,
-          y: normY / normDist
-        };
-
-        // 3. Projected cue ball deflection direction (accounting for coefficient of restitution)
-        // cueDeflect = incomingDir - coeff * dot(incomingDir, normal) * normal
-        const e = this.config.ball.restitution || 0.95;
-        const coeff = (1 + e) / 2;
-        const dotDNorm = this.strokeDir.x * targetDeflect.x + this.strokeDir.y * targetDeflect.y;
-        
-        const cueDeflectX = this.strokeDir.x - coeff * dotDNorm * targetDeflect.x;
-        const cueDeflectY = this.strokeDir.y - coeff * dotDNorm * targetDeflect.y;
-        const cueDeflectDist = Math.sqrt(cueDeflectX * cueDeflectX + cueDeflectY * cueDeflectY);
-
-        if (cueDeflectDist > 0.01) {
-          cueDeflect = {
-            x: cueDeflectX / cueDeflectDist,
-            y: cueDeflectY / cueDeflectDist
-          };
-        } else {
-          // Absolute direct head-on collision: cue ball deflects perpendicular to incoming vector
-          cueDeflect = {
-            x: -targetDeflect.y,
-            y: targetDeflect.x
-          };
+      // Run 2 more frames (20 sub-steps) to let the post-collision velocities resolve and stabilize
+      for (let f = 0; f < 2; f++) {
+        for (let s = 0; s < subSteps; s++) {
+          Matter.Engine.update(tempEngine, subDt);
         }
+      }
+
+      const cueVelocityAfter = tempCueBall.velocity;
+      const targetVelocityAfter = hitTempTarget.velocity;
+
+      const cueSpeed = Math.sqrt(cueVelocityAfter.x * cueVelocityAfter.x + cueVelocityAfter.y * cueVelocityAfter.y);
+      const targetSpeed = Math.sqrt(targetVelocityAfter.x * targetVelocityAfter.x + targetVelocityAfter.y * targetVelocityAfter.y);
+
+      if (cueSpeed > 0.01) {
+        cueDeflect = { x: cueVelocityAfter.x / cueSpeed, y: cueVelocityAfter.y / cueSpeed };
+      }
+      if (targetSpeed > 0.01) {
+        targetDeflect = { x: targetVelocityAfter.x / targetSpeed, y: targetVelocityAfter.y / targetSpeed };
+      }
+
+      // Calculate analytical contact point (ghost center) using closestTarget's initial position
+      if (closestTarget) {
+        const T = closestTarget.position;
+        const Vx = startX - T.x;
+        const Vy = startY - T.y;
+        const dotVD = Vx * this.strokeDir.x + Vy * this.strokeDir.y;
+        const VSq = Vx * Vx + Vy * Vy;
+        const c = VSq - 4 * R * R;
+        const d = 4 * (dotVD * dotVD) - 4 * c;
+
+        if (d >= 0) {
+          const t1 = (-2 * dotVD - Math.sqrt(d)) / 2;
+          const t2 = (-2 * dotVD + Math.sqrt(d)) / 2;
+          let closestT = Infinity;
+          if (t1 > 0.01 && t2 > 0.01) closestT = Math.min(t1, t2);
+          else if (t1 > 0.01) closestT = t1;
+          else if (t2 > 0.01) closestT = t2;
+
+          if (closestT !== Infinity) {
+            ghostCenter = {
+              x: startX + this.strokeDir.x * closestT,
+              y: startY + this.strokeDir.y * closestT
+            };
+          }
+        }
+      }
+
+      // Fallback ghost center if analytical fails
+      if (!ghostCenter) {
+        ghostCenter = { x: hitTempTarget.position.x, y: hitTempTarget.position.y };
       }
     }
 

@@ -150,13 +150,13 @@ export class PhysicsEngine {
     const rowOffset = radius * Math.sqrt(3); // Triangle row spacing offset
 
     // Deterministic Protected Rack setup:
-    // High-value balls Ace (1), Jack (11), Queen (12), King (13) must sit at indices 5, 6, 7, 8 of the triangle rack
-    const highValues = [1, 11, 12, 13];
-    // Shuffle the high values
-    for (let i = highValues.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [highValues[i], highValues[j]] = [highValues[j], highValues[i]];
-    }
+    // High-value balls placed at exact coordinates:
+    // A (1) at index 3, Queen (12) at index 4, Jack (11) at index 7, King (13) at index 8
+    const ballIds = new Array(15);
+    ballIds[3] = 1;  // A
+    ballIds[4] = 12; // Q
+    ballIds[7] = 11; // J
+    ballIds[8] = 13; // K
 
     // Other balls (2-10, 14, 15)
     const otherValues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15];
@@ -166,16 +166,9 @@ export class PhysicsEngine {
       [otherValues[i], otherValues[j]] = [otherValues[j], otherValues[i]];
     }
 
-    // Map all 15 positions deterministically
-    const ballIds = new Array(15);
-    ballIds[5] = highValues[0];
-    ballIds[6] = highValues[1];
-    ballIds[7] = highValues[2];
-    ballIds[8] = highValues[3];
-
     let otherIdx = 0;
     for (let i = 0; i < 15; i++) {
-      if (i >= 5 && i <= 8) continue;
+      if (i === 3 || i === 4 || i === 7 || i === 8) continue;
       ballIds[i] = otherValues[otherIdx++];
     }
 

@@ -38,28 +38,16 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
   // ========================================================
   // 1. DETERMINISTIC PROTECTED RACK
   // ========================================================
-  it('should ensure high-value balls (A, J, Q, K) are placed randomly in the four center positions (indices 5, 6, 7, 8)', () => {
+  it('should ensure high-value balls (A, J, Q, K) are placed deterministically at exact positions (indices 3, 7, 4, 8)', () => {
     const physics = new PhysicsEngine(CONFIG);
-    const expectedHighValues = [1, 11, 12, 13];
 
     for (let testRun = 0; testRun < 20; testRun++) {
       physics.spawnBalls();
       
-      const centerBalls = [
-        physics.targetBalls[5].plugin.ballId,
-        physics.targetBalls[6].plugin.ballId,
-        physics.targetBalls[7].plugin.ballId,
-        physics.targetBalls[8].plugin.ballId
-      ];
-
-      // All 4 center positions must contain a high-value ball
-      centerBalls.forEach(ballId => {
-        expect(expectedHighValues).toContain(ballId);
-      });
-
-      // Verify they are distinct values (each is placed exactly once)
-      const uniqueCenters = new Set(centerBalls);
-      expect(uniqueCenters.size).toBe(4);
+      expect(physics.targetBalls[3].plugin.ballId).toBe(1);  // A
+      expect(physics.targetBalls[4].plugin.ballId).toBe(12); // Q
+      expect(physics.targetBalls[7].plugin.ballId).toBe(11); // J
+      expect(physics.targetBalls[8].plugin.ballId).toBe(13); // K
     }
   });
 
@@ -147,7 +135,7 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
   // ========================================================
   // 4. ILLEGAL BREAK TURNOVER
   // ========================================================
-  it('should transfer turn to opponent and position cue ball in kitchen behind head string on illegal break', () => {
+  it('should transfer turn to opponent and keep cue ball in place on illegal break if no scratch occurs', () => {
     const physics = new PhysicsEngine(CONFIG);
     const game = new GameEngine(CONFIG);
     
@@ -158,6 +146,10 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
       setActivePlayer: () => {},
       setBallVisibility: () => {}
     };
+
+    // Move cue ball to a non-standard position to verify it stays in place
+    physics.cueBall.position.x = 300;
+    physics.cueBall.position.y = 300;
 
     // Alice breaks
     game.activePlayer = 'Alice';
@@ -178,7 +170,38 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
     // 2. Breaker Alice gets a miss penalty
     expect(game.consecutiveMisses['Alice']).toBe(1);
 
-    // 3. Cue ball must be placed behind head string (kitchen)
+    // 3. Cue ball must stay at its rest position (300, 300)
+    expect(physics.cueBall.position.x).toBeCloseTo(300, 1);
+    expect(physics.cueBall.position.y).toBeCloseTo(300, 1);
+  });
+
+  it('should reset cue ball to kitchen if scratch occurs during break', () => {
+    const physics = new PhysicsEngine(CONFIG);
+    const game = new GameEngine(CONFIG);
+    
+    physics.spawnBalls();
+    
+    // Setup mock renderer
+    game.renderer = {
+      setActivePlayer: () => {},
+      setBallVisibility: () => {}
+    };
+
+    // Alice breaks
+    game.activePlayer = 'Alice';
+    game.isBreakShot = true;
+    physics.isBreakShot = true;
+
+    // Simulate scratch: pocket overlap on cue ball
+    game.handleShotStart();
+    game.handlePocketOverlap(physics.cueBall);
+    physics.handlePocketOverlap(physics.cueBall);
+
+    // Evaluate Shot Outcome
+    game.handleShotEnd(physics);
+
+    // Assertions:
+    // 1. Cue ball must be placed behind head string (kitchen)
     const expectedHeadStringX = CONFIG.table.xCenter - CONFIG.table.width / 4;
     expect(physics.cueBall.position.x).toBeCloseTo(expectedHeadStringX, 1);
     expect(physics.cueBall.position.y).toBeCloseTo(CONFIG.table.yCenter, 1);

@@ -69,9 +69,9 @@ export const CONFIG = {
     /** @type {number} Air resistance / damping coefficient (slows balls down naturally) */
     frictionAir: 0.012,
     /** @type {number} Maximum speed a ball can travel (clamp to prevent tunneling / high-speed glitches) */
-    maxSpeed: 20,
+    maxSpeed: 40,
     /** @type {number} Alias for maxSpeed to satisfy tuning guidelines */
-    maxBallSpeed: 20,
+    maxBallSpeed: 40,
     /** @type {number} Global time scale of the physics simulation (1.0 = normal speed) */
     timeScale: 1.0
   },

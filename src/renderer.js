@@ -131,6 +131,18 @@ export class CanvasRenderer {
     headString.stroke({ color: colors.headString, width: 1.5, alpha: 0.4 });
     this.tableContainer.addChild(headString);
 
+    // 4b. Draw respawn spot markers on the felt (subtle low-opacity crosses)
+    const respawnSpots = this.config.rules?.respawnMatrix || [];
+    respawnSpots.forEach(spot => {
+      const marker = new Graphics();
+      marker.moveTo(spot.x - 4, spot.y);
+      marker.lineTo(spot.x + 4, spot.y);
+      marker.moveTo(spot.x, spot.y - 4);
+      marker.lineTo(spot.x, spot.y + 4);
+      marker.stroke({ color: colors.headString, width: 1.5, alpha: 0.35 });
+      this.tableContainer.addChild(marker);
+    });
+
     // 5. Draw visual pockets (aligned with sensory coordinate nodes)
     const pocketPositions = [
       { x: xCenter - hw, y: yCenter - hh, type: 'corner' }, // TL
