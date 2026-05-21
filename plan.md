@@ -204,6 +204,16 @@ Milestone 1 has been completely executed, tested, and validated. The following d
 - **Mobile/Touch Controls**: Tapping and dragging on the table aims. Releasing the touch (`pointerup`) automatically locks the angle so that the player can safely drag the left slider.
 - **Neon Cyan Guide Line & Glowing Ring**: When aiming is locked, drawing high-opacity, thick neon-cyan (`0x00e5ff`) guide lines and a glowing circle around the cue ball center, adding premium visual indicator cues.
 - **Dynamic HUD Instructions**: Re-centered HUD status text cycles between unlocked aiming instructions, locked power slider instructions, and active balls rolling states.
-- **Unit Testing**: Created `tests/aimLock.test.js` containing 5 automated tests validating aiming lock states, mouse clicks, move prevention, and mobile touch releases.
+- **Unit Testing**: Created `tests/aimLock.test.js` containing automated tests validating aiming lock states, mouse clicks, move prevention, and mobile touch releases.
+
+### Milestone 1.4: Precision Aim Lock Stability & Multi-Touch Safety
+- **Context-Aware Generous Slider hit area**: Dynamically expands the `isInsideSlider` horizontal checking buffer (from `30px` to `80px` up to `x = 140`) when the aim is locked, covering the entire left gutter and cushion boundary. This completely eliminates fat-finger misses or accidental clicks from toggling the lock or resetting aimed angles.
+- **Multi-Touch Pointer Capture**: Tracks the active dragging or aiming pointer via `this.activePointerId = e.pointerId` on initiation. Secondary touch events during active gestures are ignored, and only inputs matching the active pointer ID are processed, preventing palm/finger coordinate overwrites and touch jitters.
+- **Enhanced Test Automation**: Expanded `tests/aimLock.test.js` to assert that secondary touches are safely ignored and the slider detection box correctly expands when locked.
+
+### Milestone 1.5: Gutter Safety & Vertically Unlimited Charging
+- **Vertically Unlimited Charging Bounds**: Modified the locked slider interaction bounds to cover an unrestricted vertical Y-range (`verticalBuffer = 200`, spanning Y from `-62` to `738` on the `576px` canvas). Any clicks/drags in the slider's column when locked successfully charge and fire the cue ball, preventing vertical "misses".
+- **Left Gutter Safety Guard**: Introduced a coordinate guard `if (mouseX < 112) return;` in `pointerdown` to ignore any off-target gutter clicks that missed the slider, completely preventing accidental lock resets/toggles.
+- **Verification**: Added TDD tests in `tests/aimLock.test.js` validating the unrestricted vertical bounds and gutter safety guard.
 
 All unit tests are **100% green and compile successfully**. The local development environment compiles cleanly.

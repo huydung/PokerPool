@@ -186,4 +186,111 @@ describe('Poker Pool - Precision Aim Lock-In TDD Suite', () => {
     expect(controls.isAiming).toBe(false);
     expect(controls.isLocked).toBe(true);
   });
+
+  it('should map coordinates correctly under letterbox contain conditions', () => {
+    const canvas = new MockCanvas();
+    const physics = new PhysicsEngine(CONFIG);
+    physics.spawnBalls();
+    
+    // Simulate a DOM canvas width of 2048 and height of 576 (aspect ratio 32:9 - horizontal bars on left and right)
+    // The canvas config has cw = 1024, ch = 576 (ratio 16:9 = 1.7778)
+    // For DOM canvas: dw = 2048, dh = 576 (ratio = 3.5556 > 1.7778)
+    // scaledWidth = dh * 1.7778 = 1024
+    // offsetX = (2048 - 1024) / 2 = 512
+    canvas.getBoundingClientRect = () => ({
+      left: 10,
+      top: 20,
+      width: 2048,
+      height: 576
+    });
+
+    const controls = new AimingControls(canvas, physics, CONFIG);
+
+    // If clientX is 512 + 10 (left boundary of active canvas area)
+    const result1 = controls.getCanvasCoordinates(522, 20);
+    expect(result1.x).toBeCloseTo(0, 5);
+    expect(result1.y).toBeCloseTo(0, 5);
+
+    // If clientX is 512 + 1024 + 10 (right boundary of active canvas area)
+    const result2 = controls.getCanvasCoordinates(1546, 596);
+    expect(result2.x).toBeCloseTo(1024, 5);
+    expect(result2.y).toBeCloseTo(576, 5);
+  });
+
+  it('should ignore secondary pointerdown events during active slider dragging (multi-touch safety)', () => {
+    const canvas = new MockCanvas();
+    const physics = new PhysicsEngine(CONFIG);
+    physics.spawnBalls();
+
+    const controls = new AimingControls(canvas, physics, CONFIG);
+    physics.areAllBallsStopped = () => true;
+
+    // First touch down on slider
+    canvas.dispatchEvent('pointerdown', {
+      clientX: 30,
+      clientY: 200,
+      pointerType: 'touch',
+      pointerId: 1
+    });
+
+    expect(controls.isDraggingSlider).toBe(true);
+    expect(controls.activePointerId).toBe(1);
+
+    // Try a second touch down on the table with a different pointer ID
+    canvas.dispatchEvent('pointerdown', {
+      clientX: 500,
+      clientY: 300,
+      pointerType: 'touch',
+      pointerId: 2
+    });
+
+    // Should NOT reset isDraggingSlider and activePointerId should remain 1
+    expect(controls.isDraggingSlider).toBe(true);
+    expect(controls.activePointerId).toBe(1);
+  });
+
+  it('should expand the slider interaction zone when the aim is locked', () => {
+    const canvas = new MockCanvas();
+    const physics = new PhysicsEngine(CONFIG);
+    physics.spawnBalls();
+
+    const controls = new AimingControls(canvas, physics, CONFIG);
+    
+    // When aim is unlocked (isLocked = false), coordinate x = 120 is OUTSIDE the slider
+    expect(controls.isLocked).toBe(false);
+    expect(controls.isInsideSlider(120, 200)).toBe(false);
+
+    // Lock the aim
+    controls.isLocked = true;
+
+    // When aim is locked (isLocked = true), coordinate x = 120 is INSIDE the expanded slider zone
+    expect(controls.isInsideSlider(120, 200)).toBe(true);
+
+    // And verify the vertically unlimited Y-axis extension when locked (e.g. y = 50 is far above y = 138)
+    expect(controls.isInsideSlider(120, 50)).toBe(true);
+  });
+
+  it('should not reset the aiming lock when clicking in the left gutter (gutter safety guard)', () => {
+    const canvas = new MockCanvas();
+    const physics = new PhysicsEngine(CONFIG);
+    physics.spawnBalls();
+
+    const controls = new AimingControls(canvas, physics, CONFIG);
+    physics.areAllBallsStopped = () => true;
+
+    // Set lock
+    controls.isLocked = true;
+
+    // Force isInsideSlider to return false to test the safety guard
+    controls.isInsideSlider = () => false;
+
+    canvas.dispatchEvent('pointerdown', {
+      clientX: 110,
+      clientY: 50,
+      pointerType: 'mouse'
+    });
+
+    // The lock should STILL be true (not toggled to false by Case B)
+    expect(controls.isLocked).toBe(true);
+  });
 });

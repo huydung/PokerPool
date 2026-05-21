@@ -82,7 +82,7 @@ export const CONFIG = {
   
   cue: {
     /** @type {number} Maximum force applied to the cue ball on a full stroke */
-    maxForce: 0.5,
+    maxForce: 1,
     /** @type {number} Drag sensitivity multiplier (scales mouse delta to impulse) */
     dragScale: 0.0008,
     /** @type {number} Minimum drag distance in pixels to register a shot */

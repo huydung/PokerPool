@@ -105,6 +105,8 @@ Your objective is to implement the Core Physics & Interactive Aiming Sandbox usi
      * Mouse pointerdown clicks on the canvas toggle the aiming `isLocked` state machine.
      * Pointermove events during locked states do not modify the `strokeDir` vector.
      * Touch pointerup releases trigger automatic aiming angle lock-in state transitions.
+     * Multi-touch safety: secondary pointerdown events are completely ignored during an active slider drag.
+     * Context-aware expanded slider box: the interaction zone dynamically expands from 30px to 80px (up to x = 140) when aim is locked.
 ```
 
 ### 3.2 Milestone 2: Game Initialization & Safe-Haven Break
@@ -262,3 +264,7 @@ During the actual implementation of Milestone 1, the following structural revisi
 
 ### 4. Async/Await Test Assertions
 - **Guideline**: When testing dynamic imports or physics updates with ticking, unit tests must be declared `async` and awaited to ensure Vitest correctly captures assertions and prevents unhandled promise leaks.
+
+### 5. Milestone 1.5 Realizations (Aim Lock Stability)
+- **Vertically Unlimited Charging Bounds**: To prevent players from losing their locked aiming angle when clicking/dragging above or below the physical boundaries of the power slider track, the vertical buffer of the slider bounding box (`isInsideSlider`) is dynamically expanded to cover the entire canvas height (`verticalBuffer = 200` when `isLocked = true`).
+- **Left Gutter Safety Guard**: A dedicated coordinates safety check `if (mouseX < 112) return;` inside the event `pointerdown` guarantees that clicking or touching anywhere in the left margin/gutter that misses the slider will be ignored as a no-op, rather than falling into the table click/touch code that resets or toggles `isLocked`. This stabilizes shot preparation UX perfectly.

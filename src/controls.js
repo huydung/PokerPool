@@ -24,6 +24,7 @@ export class AimingControls {
     this.currentMousePos = { x: 512, y: 338 }; // Centered default
     this.dragDist = 0;
     this.strokeDir = { x: 1, y: 0 }; // Default pointing right
+    this.activePointerId = undefined; // Track the active pointer for multi-touch safety
 
     // Active status
     this.enabled = true;
@@ -32,7 +33,47 @@ export class AimingControls {
   }
 
   /**
-   * Helper to check if coordinates are within the vertical slider interaction area (plus buffer padding)
+   * Translates viewport screen coordinates to deterministic game canvas coordinates,
+   * accounting for letterboxing (object-fit: contain) on any screen size.
+   * @param {number} clientX Viewport X coordinate
+   * @param {number} clientY Viewport Y coordinate
+   * @returns {Object} { x, y } mapped coordinates
+   */
+  getCanvasCoordinates(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const dw = rect.width;
+    const dh = rect.height;
+    const cw = this.config.canvas.width;
+    const ch = this.config.canvas.height;
+
+    const canvasRatio = cw / ch;
+    const domRatio = dw / dh;
+
+    let offsetX = 0;
+    let offsetY = 0;
+    let scaledWidth = dw;
+    let scaledHeight = dh;
+
+    if (domRatio > canvasRatio) {
+      // Horizontal letterboxing (black bars on left/right)
+      scaledWidth = dh * canvasRatio;
+      offsetX = (dw - scaledWidth) / 2;
+    } else if (domRatio < canvasRatio) {
+      // Vertical letterboxing (black bars on top/bottom)
+      scaledHeight = dw / canvasRatio;
+      offsetY = (dh - scaledHeight) / 2;
+    }
+
+    const x = ((clientX - rect.left - offsetX) / scaledWidth) * cw;
+    const y = ((clientY - rect.top - offsetY) / scaledHeight) * ch;
+
+    return { x, y };
+  }
+
+  /**
+   * Helper to check if coordinates are within the vertical slider interaction area.
+   * Uses a highly generous bounding box on the left margin (especially when locked)
+   * to eliminate accidental aiming resets due to quick clicks or fat-fingered touches.
    * @param {number} x Canvas X coordinate
    * @param {number} y Canvas Y coordinate
    * @returns {boolean} True if coordinates are inside the slider bounds
@@ -40,11 +81,20 @@ export class AimingControls {
   isInsideSlider(x, y) {
     const s = this.config.slider;
     if (!s) return false;
+    
+    // Left rail starts at x = 112. Anything x < 112 is in the gutter area.
+    // When aim is locked, we make the slider box extremely wide (up to x = 140)
+    // so players can easily drag the power slider without missing.
+    const isLocked = this.isLocked;
+    const horizontalBuffer = isLocked ? 80 : 30;
+    // When locked, extend vertical buffer to cover the entire canvas height to avoid accidental Y-axis misses.
+    const verticalBuffer = isLocked ? 200 : 20;
+
     return (
-      x >= s.x - s.touchBuffer &&
-      x <= s.x + s.width + s.touchBuffer &&
-      y >= s.y - s.touchBuffer &&
-      y <= s.y + s.height + s.touchBuffer
+      x >= 0 &&
+      x <= s.x + s.width + horizontalBuffer &&
+      y >= s.y - verticalBuffer &&
+      y <= s.y + s.height + verticalBuffer
     );
   }
 
@@ -60,18 +110,29 @@ export class AimingControls {
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) return;
 
-      const rect = this.canvas.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) / rect.width) * this.config.canvas.width;
-      const mouseY = ((e.clientY - rect.top) / rect.height) * this.config.canvas.height;
+      // Multi-touch safety: If we are already active with a pointer, ignore any new pointerdowns!
+      if (this.activePointerId !== undefined) return;
+
+      const coords = this.getCanvasCoordinates(e.clientX, e.clientY);
+      const mouseX = coords.x;
+      const mouseY = coords.y;
 
       this.currentMousePos = { x: mouseX, y: mouseY };
 
       // Case A: Interaction inside the vertical power slider zone
       if (this.isInsideSlider(mouseX, mouseY)) {
         this.isDraggingSlider = true;
+        this.activePointerId = e.pointerId; // Capture this pointer
         const dragRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
         this.dragDist = dragRatio * this.config.cue.maxDrag;
       } else {
+        // Gutter Safety Guard: If click/touch is in the left rail/gutter area (mouseX < 112),
+        // but somehow missed the slider (e.g. out of vertical bounds), do NOT treat it as a table interaction.
+        // This completely prevents accidental aiming resets/toggles when clicking in the left gutter.
+        if (mouseX < 112) {
+          return;
+        }
+
         // Case B: Table tap/drag interaction
         this.isDraggingSlider = false;
         
@@ -79,6 +140,7 @@ export class AimingControls {
           // Mobile/Touch device: start table aiming, unlock angle for current gesture
           this.isAiming = true;
           this.isLocked = false; 
+          this.activePointerId = e.pointerId; // Capture this pointer
           const cueBall = this.physics.cueBall;
           const dx = mouseX - cueBall.position.x;
           const dy = mouseY - cueBall.position.y;
@@ -114,9 +176,12 @@ export class AimingControls {
     this.canvas.addEventListener('pointermove', (e) => {
       if (!this.enabled || !this.physics.cueBall) return;
 
-      const rect = this.canvas.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) / rect.width) * this.config.canvas.width;
-      const mouseY = ((e.clientY - rect.top) / rect.height) * this.config.canvas.height;
+      // Multi-touch safety: if we are tracking a specific pointer, ignore others
+      if (this.activePointerId !== undefined && e.pointerId !== this.activePointerId) return;
+
+      const coords = this.getCanvasCoordinates(e.clientX, e.clientY);
+      const mouseX = coords.x;
+      const mouseY = coords.y;
 
       this.currentMousePos = { x: mouseX, y: mouseY };
 
@@ -158,6 +223,12 @@ export class AimingControls {
 
     // Window level pointerup (release to fire shot or cancel)
     window.addEventListener('pointerup', (e) => {
+      // Multi-touch safety: only handle pointerup for our active pointer if tracked
+      if (this.activePointerId !== undefined && e.pointerId !== this.activePointerId) return;
+
+      // Reset pointer tracking
+      this.activePointerId = undefined;
+
       // For mobile touch, releasing finger off table auto-locks aiming angle
       if (e.pointerType === 'touch' && this.isAiming) {
         this.isAiming = false;

@@ -128,3 +128,44 @@ This log tracks all architectural decisions, design choices, physical coordinate
 - **Symptom**: Releasing the finger on touch screens during dragging should lock the aim, but tapping the screen again should let you adjust the aim without firing the cue immediately.
 - **Cause**: The pointer type distinction had to be clean to prevent standard desktop clicks from firing mobile-only auto-lock logic.
 - **Resolution**: Cleanly isolated touch gestures using `e.pointerType === 'touch'`. On touch pointerdown, `isLocked` is reset to false to allow direct angle readjustments, and on window pointerup, `isLocked` is set to true only if `this.isAiming` was active, ensuring smooth aiming transitions.
+
+---
+
+## Milestone 1.4 - Precision Aim Lock Stability & Multi-Touch Safety (2026-05-21)
+
+### Key Decisions
+1. **Generous Dynamic Slider Detection**:
+   - **Resolution**: Designed an expanded, context-aware `isInsideSlider` bounding box. When the aim is unlocked, the buffer zone is expanded to `30px` (up to `x = 90`).
+   - **Context-Aware Expansion**: When the aim is locked, the buffer zone is dynamically expanded to `80px` (up to `x = 140`). This covers the entire left rail of the pool table. Because the table's active felt starts at `x = 112`, and the balls can only occupy `x >= 112`, any touch/click in the gutter or left margin when locked is captured by the slider, completely preventing accidental aim unlocks.
+2. **Deterministic Multi-Touch Pointer Tracking**:
+   - **Resolution**: Integrated robust pointer tracking by saving `this.activePointerId = e.pointerId` upon active slider drag or table aim gesture initiation.
+   - **Event Isolation**: Ignored secondary `pointerdown` inputs when a drag is active, and only allowed coordinates and release events to be processed from the captured pointer ID during `pointermove` and `pointerup`.
+
+### Major Bugs & Lessons Learned
+
+#### 1. Slider Drag/Click Fat-Finger Resets
+- **Symptom**: Tapping or clicking slightly to the right of the narrow power slider caused the aim lock to immediately unlock, snapping the cue stick vector towards the slider and ruining the shot setup.
+- **Cause**: The slider collision bounds check (`isInsideSlider`) was too tight. A miss of even 1 pixel defaulted the gesture to the "Table click/touch" interaction branch, which resets/toggles the locked aiming angle.
+- **Resolution**: Implemented the dynamic expanded horizontal bounds. Since no game actions (other than clicking the slider) need to happen in the gutter area (`x < 112`), expanding the slider zone horizontally fully resolved the snapping issues.
+
+#### 2. Multi-Touch Coordinate Overwriting
+- **Symptom**: During a touch drag on the slider on mobile, a secondary hand touch (e.g. resting palm or extra finger) caused the power slider pullback to reset, or registered as a table-aiming gesture.
+- **Cause**: Multi-touch events fire `pointermove` events for every contact point, overriding the internal `mouseX` and `mouseY` variables without verifying if the event originated from the active dragging pointer.
+- **Resolution**: Bound all pointer interactions to the captured `activePointerId`. Secondary touches are filtered out immediately in `pointerdown`, `pointermove`, and `pointerup`, ensuring robust sandboxed inputs.
+
+---
+
+## Milestone 1.5 - Bulletproof Gutter Safety & Vertically Unlimited Charging (2026-05-21)
+
+### Key Decisions
+1. **Vertically Unlimited Charging Bounds**:
+   - **Resolution**: Extended `isInsideSlider(x, y)` to cover an unrestricted vertical Y-range (`verticalBuffer = 200`, mapping Y from `-62` to `738` on a `576px` canvas) when `isLocked === true`. This ensures that players dragging their mouse or finger to charge a shot will never trigger a vertical "slider miss" even if they pull far above or below the visual track.
+2. **Left Gutter Safety Guard**:
+   - **Resolution**: Added a strict coordinates guard in the `pointerdown` event: if a click or touch falls in the left gutter/rail area (`mouseX < 112`) but misses the slider, the event handler returns immediately without executing the default table-interaction logic. This guarantees that clicking near the slider inside the gutter will never toggle or reset the aiming lock state.
+
+### Major Bugs & Lessons Learned
+
+#### 1. Vertical Slider Misses Causing Instant Reset
+- **Symptom**: While aiming lock stayed locked during visual drags, dragging or clicking slightly above or below the slider's physical track (e.g., at Y < 98 or Y > 578) instantly reset or toggled the aiming lock, ruining the shot alignment about 2/3 of the time.
+- **Cause**: The slider's vertical interaction check was limited. Releasing or clicking slightly above the top cushion height (e.g., Y = 50 in the HUD area) returned `false` for `isInsideSlider`, falling into the table-click code block and resetting/toggling `isLocked`.
+- **Resolution**: Expanded the vertical interaction zone when locked to cover the entire canvas height, and added the `mouseX < 112` gutter safety guard to bypass table-click logic for any off-target gutter clicks. Tests were added to verify 100% stable locking.
