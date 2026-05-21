@@ -227,6 +227,22 @@ export class PhysicsEngine {
   }
 
   /**
+   * Checks if all dynamic balls (cue ball and active target balls) on the table have stopped.
+   * @returns {boolean} True if all balls have speeds < 0.05
+   */
+  areAllBallsStopped() {
+    if (!this.cueBall) return false;
+    const cueSpeed = Matter.Body.getSpeed(this.cueBall);
+    if (cueSpeed > 0.05) return false;
+
+    for (let i = 0; i < this.targetBalls.length; i++) {
+      const ballSpeed = Matter.Body.getSpeed(this.targetBalls[i]);
+      if (ballSpeed > 0.05) return false;
+    }
+    return true;
+  }
+
+  /**
    * Handles pocket sensory overlaps: resets the cue ball on scratch or removes target balls.
    * @param {Matter.Body} ball The dynamic ball body
    */
@@ -245,12 +261,12 @@ export class PhysicsEngine {
   }
 
   /**
-   * Helper to apply an impulse force vector to the cue ball
-   * @param {Matter.Vector} force Force vector
+   * Helper to set direct velocity on the cue ball, overriding residual vectors
+   * @param {Matter.Vector} velocity Starting velocity vector
    */
-  applyCueStroke(force) {
+  applyCueStroke(velocity) {
     if (!this.cueBall) return;
-    // Set cue ball speed/angle using active force at the cue ball center
-    Matter.Body.applyForce(this.cueBall, this.cueBall.position, force);
+    // Overrides any residual velocities and guarantees 100% directional accuracy
+    Matter.Body.setVelocity(this.cueBall, velocity);
   }
 }
