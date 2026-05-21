@@ -353,4 +353,203 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
     expect(gameOverWinner).toBe('Bob');
     expect(gameOverReason).toContain('3 consecutive misses and is disqualified');
   });
+
+  // ========================================================
+  // 7. POKER EVALUATOR TESTS (MILESTONE 5)
+  // ========================================================
+  describe('Standard 5-Card Poker Evaluator', () => {
+    it('should correctly rank High Card vs Pair vs Flush vs Straight', () => {
+      const { evaluatePokerHand } = require('../src/poker.js');
+
+      // 1. High Card
+      const handHigh = [
+        { rank: 2, suit: 'S' }, { rank: 4, suit: 'H' }, { rank: 6, suit: 'D' }, { rank: 8, suit: 'C' }, { rank: 10, suit: 'S' }
+      ];
+      expect(evaluatePokerHand(handHigh).rank).toBe(1); // High Card
+      expect(evaluatePokerHand(handHigh).label).toContain('High Card');
+
+      // 2. Pair
+      const handPair = [
+        { rank: 2, suit: 'S' }, { rank: 2, suit: 'H' }, { rank: 6, suit: 'D' }, { rank: 8, suit: 'C' }, { rank: 10, suit: 'S' }
+      ];
+      expect(evaluatePokerHand(handPair).rank).toBe(2); // One Pair
+      expect(evaluatePokerHand(handPair).label).toContain('Pair of 2s');
+
+      // 3. Straight
+      const handStraight = [
+        { rank: 2, suit: 'S' }, { rank: 3, suit: 'H' }, { rank: 4, suit: 'D' }, { rank: 5, suit: 'C' }, { rank: 6, suit: 'S' }
+      ];
+      expect(evaluatePokerHand(handStraight).rank).toBe(5); // Straight
+      expect(evaluatePokerHand(handStraight).label).toContain('Straight (6 High)');
+
+      // 4. Flush
+      const handFlush = [
+        { rank: 2, suit: 'S' }, { rank: 4, suit: 'S' }, { rank: 6, suit: 'S' }, { rank: 8, suit: 'S' }, { rank: 11, suit: 'S' }
+      ];
+      expect(evaluatePokerHand(handFlush).rank).toBe(6); // Flush
+      expect(evaluatePokerHand(handFlush).label).toContain('Flush (Jack High)');
+    });
+
+    it('should correctly evaluate Ace-low straight wheel (5-4-3-2-A)', () => {
+      const { evaluatePokerHand } = require('../src/poker.js');
+
+      const handWheel = [
+        { rank: 1, suit: 'S' }, { rank: 2, suit: 'H' }, { rank: 3, suit: 'D' }, { rank: 4, suit: 'C' }, { rank: 5, suit: 'S' }
+      ];
+      const res = evaluatePokerHand(handWheel);
+      expect(res.rank).toBe(5); // Straight
+      expect(res.label).toContain('Straight (5 High)');
+      expect(res.kickers[0]).toBe(5); // High card of a wheel is 5
+    });
+
+    it('should correctly compare hands and resolve kicker tiebreakers', () => {
+      const { compareHands } = require('../src/poker.js');
+
+      // Both have Pair of Aces (14), but A has kicker 10 and B has kicker King (13)
+      const handA = [
+        { rank: 1, suit: 'S' }, { rank: 1, suit: 'H' }, { rank: 10, suit: 'D' }, { rank: 5, suit: 'C' }, { rank: 2, suit: 'S' }
+      ];
+      const handB = [
+        { rank: 1, suit: 'D' }, { rank: 1, suit: 'C' }, { rank: 13, suit: 'H' }, { rank: 4, suit: 'S' }, { rank: 3, suit: 'C' }
+      ];
+
+      const res = compareHands(handA, handB, null, null, null);
+      expect(res.winner).toBe('B'); // B has King kicker
+      expect(res.reason).toContain('Better kicker value');
+    });
+
+    it('should resolve absolute ties in hand value via stand priorities', () => {
+      const { compareHands } = require('../src/poker.js');
+
+      // Both have identical pairs and kickers
+      const handA = [
+        { rank: 1, suit: 'S' }, { rank: 1, suit: 'H' }, { rank: 10, suit: 'D' }, { rank: 5, suit: 'C' }, { rank: 2, suit: 'S' }
+      ];
+      const handB = [
+        { rank: 1, suit: 'D' }, { rank: 1, suit: 'C' }, { rank: 10, suit: 'H' }, { rank: 5, suit: 'S' }, { rank: 2, suit: 'C' }
+      ];
+
+      // Case A: Alice stood first
+      const res1 = compareHands(handA, handB, null, 'Alice', null);
+      expect(res1.winner).toBe('A');
+      expect(res1.reason).toContain('Alice stood first');
+
+      // Case B: Bob stood first
+      const res2 = compareHands(handA, handB, null, 'Bob', null);
+      expect(res2.winner).toBe('B');
+      expect(res2.reason).toContain('Bob stood first');
+
+      // Case C: Alice completed hand first naturally
+      const res3 = compareHands(handA, handB, null, null, 'Alice');
+      expect(res3.winner).toBe('A');
+      expect(res3.reason).toContain('Alice completed hand first');
+    });
+  });
+
+  // ========================================================
+  // 8. CARD SWAP DECISION FLOW
+  // ========================================================
+  describe('Card Swap Flow', () => {
+    it('should prompt card swap and splice hand size to 5 when scoring a 6th card', async () => {
+      const physics = new PhysicsEngine(CONFIG);
+      const game = new GameEngine(CONFIG);
+
+      game.renderer = {
+        setActivePlayer: () => {},
+        setBallVisibility: () => {},
+        updateHUD: () => {},
+        updatePocketGraphics: () => {}
+      };
+
+      // Set pocket 0 to mapped suit Spades
+      game.pocketSuits[0] = 'S';
+
+      // Alice already has 5 cards
+      game.hands['Alice'] = [
+        { rank: 2, suit: 'S' },
+        { rank: 3, suit: 'S' },
+        { rank: 4, suit: 'S' },
+        { rank: 5, suit: 'S' },
+        { rank: 6, suit: 'S' }
+      ];
+
+      // Fast mock promptCardSwap to automatically remove the newly pocketed 6th card (index 5)
+      game.promptCardSwap = (player) => {
+        const hand = game.hands[player];
+        expect(hand.length).toBe(6);
+        hand.splice(5, 1); // remove the pocketed card
+        return Promise.resolve();
+      };
+
+      // Pocket standard ball 10 in Spades Pocket 0
+      physics.spawnBalls();
+      const targetBall = physics.targetBalls.find(b => b.plugin.ballId === 10);
+      game.handleShotStart();
+      game.handlePocketOverlap(targetBall, 0);
+
+      await game.processNormalPocketedBalls(physics);
+
+      // Verify that hand size is back to 5
+      expect(game.hands['Alice'].length).toBe(5);
+      expect(game.hands['Alice'].some(c => c.rank === 10)).toBe(false); // card 10 was discarded
+    });
+  });
+
+  // ========================================================
+  // 9. VOLUNTARY STAND & COUNTDOWN
+  // ========================================================
+  describe('Voluntary Stand & Countdown', () => {
+    it('should activate stand, switch turn, and trigger showdown when countdown hits 0', async () => {
+      const physics = new PhysicsEngine(CONFIG);
+      const game = new GameEngine(CONFIG);
+
+      game.renderer = {
+        setActivePlayer: () => {},
+        setBallVisibility: () => {},
+        updateHUD: () => {},
+        updatePocketGraphics: () => {}
+      };
+
+      let showdownTriggered = false;
+      game.triggerShowdown = () => {
+        showdownTriggered = true;
+      };
+
+      // Active player Alice has exactly 5 cards and decides to stand
+      game.hands['Alice'] = [
+        { rank: 2, suit: 'S' }, { rank: 3, suit: 'S' }, { rank: 4, suit: 'S' }, { rank: 5, suit: 'S' }, { rank: 6, suit: 'S' }
+      ];
+      game.activePlayer = 'Alice';
+
+      game.triggerStand('Alice');
+
+      // Verify standing states
+      expect(game.standingPlayer).toBe('Alice');
+      expect(game.handsStood['Alice']).toBe(true);
+      expect(game.standCountdown).toBe(3);
+      expect(game.activePlayer).toBe('Bob'); // turn transferred to Bob immediately
+
+      // Simulate Bob taking 3 shots
+      physics.spawnBalls();
+      
+      // Shot 1
+      game.handleShotStart();
+      await game.handleShotEnd(physics);
+      expect(game.standCountdown).toBe(2);
+      expect(showdownTriggered).toBe(false);
+
+      // Shot 2
+      game.handleShotStart();
+      await game.handleShotEnd(physics);
+      expect(game.standCountdown).toBe(1);
+      expect(showdownTriggered).toBe(false);
+
+      // Shot 3
+      game.handleShotStart();
+      await game.handleShotEnd(physics);
+      expect(game.standCountdown).toBe(0);
+      expect(showdownTriggered).toBe(true); // Showdown triggered!
+    });
+  });
 });
+

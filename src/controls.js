@@ -1,3 +1,4 @@
+import Matter from 'matter-js';
 import { CONFIG } from './config.js';
 
 /**
@@ -24,11 +25,67 @@ export class AimingControls {
     this.powerRatio = 0.0;
     this.strokeDir = { x: 1, y: 0 }; // Default pointing right
     this.activePointerId = undefined; // Track the active pointer for multi-touch safety
+    this._hasBallInHand = false;
+    this.isPlacingCueBall = false;
+    this.justPlacedBall = false; // Safety flag to ignore simulated click events immediately after drop
 
     // Active status
     this.enabled = true;
 
     this.initEvents();
+  }
+
+  get hasBallInHand() {
+    return this._hasBallInHand;
+  }
+
+  set hasBallInHand(val) {
+    this._hasBallInHand = val;
+    if (val) {
+      this.showBallInHandUI();
+    } else {
+      this.hideBallInHandUI();
+    }
+  }
+
+  showBallInHandUI() {
+    this.hideBallInHandUI(); // Safeguard: remove any existing one first
+    
+    const container = document.getElementById('game-container') || document.body;
+    
+    const ui = document.createElement('div');
+    ui.id = 'ball-in-hand-ui';
+    ui.className = 'ball-in-hand-hud-overlay';
+    ui.innerHTML = `
+      <button id="confirm-placement-btn" class="hud-confirm-btn">CONFIRM POSITION</button>
+    `;
+    container.appendChild(ui);
+    
+    const confirmBtn = ui.querySelector('#confirm-placement-btn');
+    confirmBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Stop event bubbling to canvas
+      this.confirmCueBallPlacement();
+    });
+  }
+
+  hideBallInHandUI() {
+    const existing = document.getElementById('ball-in-hand-ui');
+    if (existing) {
+      existing.remove();
+    }
+  }
+
+  confirmCueBallPlacement() {
+    this.hasBallInHand = false;
+    this.isPlacingCueBall = false;
+    
+    // Just placed ball safety flag to prevent immediate aim-locking on pointerup simulated clicks
+    this.justPlacedBall = true;
+    setTimeout(() => {
+      this.justPlacedBall = false;
+    }, 250);
+    
+    console.log("Cue ball placement confirmed.");
   }
 
   /**
@@ -105,9 +162,8 @@ export class AimingControls {
     this.canvas.addEventListener('pointerdown', (e) => {
       if (!this.enabled || !this.physics.cueBall) return;
 
-      // Check if all balls are stopped before allowing aim adjustments or shots
-      const allStopped = this.physics.areAllBallsStopped();
-      if (!allStopped) return;
+      // Safety check to ignore simulated clicks/taps immediately after placing the ball
+      if (this.justPlacedBall) return;
 
       // Multi-touch safety: If we are already active with a pointer, ignore any new pointerdowns!
       if (this.activePointerId !== undefined) return;
@@ -117,6 +173,33 @@ export class AimingControls {
       const mouseY = coords.y;
 
       this.currentMousePos = { x: mouseX, y: mouseY };
+
+      // Ball-in-Hand drag-to-place handler
+      if (this.hasBallInHand) {
+        // Gutter/slider safety: ignore if touching near the slider (mouseX < 112)
+        if (mouseX < 112) {
+          return;
+        }
+
+        // Ensure they touched inside the table felt area (below HUD)
+        if (mouseY > 100) {
+          const cueBall = this.physics.cueBall;
+          this.isPlacingCueBall = true;
+          this.activePointerId = e.pointerId;
+
+          // Instantly teleport the cue ball to the touch location clamped to bounds
+          const clampedX = Math.max(124, Math.min(900, mouseX));
+          const clampedY = Math.max(150, Math.min(526, mouseY));
+          Matter.Body.setPosition(cueBall, { x: clampedX, y: clampedY });
+          Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
+          Matter.Body.setAngularVelocity(cueBall, 0);
+        }
+        return; // Complete lockout: don't allow falling through to aiming / slider while hasBallInHand is active
+      }
+
+      // Check if all balls are stopped before allowing aim adjustments or shots
+      const allStopped = this.physics.areAllBallsStopped();
+      if (!allStopped) return;
 
       // Case A: Interaction inside the vertical power slider zone
       if (this.isInsideSlider(mouseX, mouseY)) {
@@ -183,6 +266,18 @@ export class AimingControls {
 
       this.currentMousePos = { x: mouseX, y: mouseY };
 
+      if (this.hasBallInHand) {
+        if (this.isPlacingCueBall) {
+          const cueBall = this.physics.cueBall;
+          const clampedX = Math.max(124, Math.min(900, mouseX));
+          const clampedY = Math.max(150, Math.min(526, mouseY));
+          Matter.Body.setPosition(cueBall, { x: clampedX, y: clampedY });
+          Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
+          Matter.Body.setAngularVelocity(cueBall, 0);
+        }
+        return; // Lock out aiming pointer movements during Ball-In-Hand
+      }
+
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) return;
 
@@ -225,6 +320,13 @@ export class AimingControls {
 
       // Reset pointer tracking
       this.activePointerId = undefined;
+
+      if (this.hasBallInHand) {
+        if (this.isPlacingCueBall) {
+          this.isPlacingCueBall = false;
+        }
+        return; // Maintain Ball-In-Hand state until explicitly confirmed via UI button click
+      }
 
       // For mobile touch, releasing finger off table auto-locks aiming angle
       if (e.pointerType === 'touch' && this.isAiming) {
@@ -283,6 +385,7 @@ export class AimingControls {
    */
   getAimData() {
     if (!this.enabled) return null;
+    if (this.hasBallInHand) return null;
 
     // Show aiming line automatically if all balls are stopped (pre-shot continuous hover-aiming)
     const allStopped = this.physics.areAllBallsStopped();

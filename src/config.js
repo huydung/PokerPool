@@ -180,6 +180,12 @@ export const CONFIG = {
     player1Name: 'Alice',
     /** @type {string} Name of Player 2 */
     player2Name: 'Bob',
+    /** @type {number} Maximum number of cards in hand (Milestone 4/5 cap) */
+    handLimit: 5,
+    /** @type {number} Maximum consecutive misses allowed before DQ (Milestone 4 DQ) */
+    maxConsecutiveMisses: 3,
+    /** @type {number} Turns/shots allowed to opponent after a player voluntary stands */
+    standCountdownTurns: 3,
     /** @type {number} Minimum cushion contacts required for a legal break if no ball is pocketed */
     minBreakCushionContacts: 4,
     /** @type {Array<{x: number, y: number}>} 9-point respawn matrix coordinates */

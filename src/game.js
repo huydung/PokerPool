@@ -1,5 +1,6 @@
 import { CONFIG } from './config.js';
 import Matter from 'matter-js';
+import { compareHands, evaluatePokerHand } from './poker.js';
 
 /**
  * Orchestrates game rules, player active turns, coin toss,
@@ -19,6 +20,17 @@ export class GameEngine {
     this.activePlayer = this.player1Name;
     this.isBreakShot = true;
     this.isTossing = false;
+
+    // Showdown & Standing States (Milestones 4 & 5)
+    this.standingPlayer = null;
+    this.firstToStand = null;
+    this.firstToCompleteHand = null;
+    this.standCountdown = -1;
+    this.gameEnded = false;
+    this.handsStood = {
+      [this.player1Name]: false,
+      [this.player2Name]: false
+    };
 
     // Turn tracking counters
     this.consecutiveMisses = {
@@ -159,6 +171,8 @@ export class GameEngine {
    * @param {PhysicsEngine} physics The active PhysicsEngine instance
    */
   async handleShotEnd(physics) {
+    if (this.gameEnded) return;
+
     console.log(`Evaluating Shot Outcome. Break: ${this.isBreakShot}, Pocketed: [${this.pocketedBallsThisShot.join(', ')}], Scratch: ${this.cueBallScratchThisShot}`);
 
     const opponent = this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
@@ -208,6 +222,9 @@ export class GameEngine {
 
         // Pass turn to opponent with Ball-In-Hand behind head string (kitchen)
         this.activePlayer = opponent;
+        if (this.controls) {
+          this.controls.hasBallInHand = true;
+        }
         
         console.log(`Illegal break or scratch. Turn passes to ${this.activePlayer} with Ball-in-Hand.`);
       }
@@ -225,6 +242,18 @@ export class GameEngine {
       await this.processNormalPocketedBalls(physics);
     }
 
+    if (this.gameEnded) return;
+
+    // Stand countdown decrement for active shooting player when opponent has stood
+    if (this.standingPlayer) {
+      this.standCountdown--;
+      console.log(`Stand countdown: ${this.standCountdown} shots remaining for ${this.activePlayer}.`);
+      if (this.standCountdown <= 0) {
+        this.triggerShowdown();
+        return;
+      }
+    }
+
     // Synchronize renderer active player name display
     if (this.renderer) {
       this.renderer.setActivePlayer(this.activePlayer);
@@ -236,6 +265,8 @@ export class GameEngine {
    * @param {PhysicsEngine} physics The active PhysicsEngine instance
    */
   async processNormalPocketedBalls(physics) {
+    if (this.gameEnded) return;
+
     const opponent = this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
     
     let anyValidScore = false;
@@ -262,8 +293,17 @@ export class GameEngine {
             const hand = this.hands[this.activePlayer] || [];
             const hasCard = hand.some(c => c.rank === ballId && c.suit === selectedSuit);
             if (!hasCard) {
-              hand.push({ rank: ballId, suit: selectedSuit });
-              anyValidScore = true;
+              if (hand.length < 5) {
+                hand.push({ rank: ballId, suit: selectedSuit });
+                anyValidScore = true;
+                if (!this.firstToCompleteHand && hand.length === 5) {
+                  this.firstToCompleteHand = this.activePlayer;
+                }
+              } else {
+                hand.push({ rank: ballId, suit: selectedSuit });
+                await this.promptCardSwap(this.activePlayer);
+                anyValidScore = true;
+              }
             }
 
             if (this.renderer) {
@@ -301,8 +341,17 @@ export class GameEngine {
           const hasCard = hand.some(c => c.rank === ballId && c.suit === suit);
           
           if (!hasCard) {
-            hand.push({ rank: ballId, suit });
-            anyValidScore = true;
+            if (hand.length < 5) {
+              hand.push({ rank: ballId, suit });
+              anyValidScore = true;
+              if (!this.firstToCompleteHand && hand.length === 5) {
+                this.firstToCompleteHand = this.activePlayer;
+              }
+            } else {
+              hand.push({ rank: ballId, suit });
+              await this.promptCardSwap(this.activePlayer);
+              anyValidScore = true;
+            }
             if (this.renderer) {
               this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
             }
@@ -324,8 +373,17 @@ export class GameEngine {
           const hasCard = hand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit);
           
           if (!hasCard) {
-            hand.push(chosenCard);
-            anyValidScore = true;
+            if (hand.length < 5) {
+              hand.push(chosenCard);
+              anyValidScore = true;
+              if (!this.firstToCompleteHand && hand.length === 5) {
+                this.firstToCompleteHand = this.activePlayer;
+              }
+            } else {
+              hand.push(chosenCard);
+              await this.promptCardSwap(this.activePlayer);
+              anyValidScore = true;
+            }
             if (this.renderer) {
               this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
             }
@@ -349,14 +407,23 @@ export class GameEngine {
       }
     }
 
+    const isOpponentStanding = this.handsStood[opponent];
+
     // Evaluate turn shifts and misses
     if (this.cueBallScratchThisShot) {
       this.consecutiveMisses[this.activePlayer]++;
-      this.activePlayer = opponent;
+      if (!isOpponentStanding) {
+        this.activePlayer = opponent;
+      }
+      if (this.controls) {
+        this.controls.hasBallInHand = true;
+      }
       console.log(`Scratch! Turn transitions to ${this.activePlayer}`);
     } else if (anyInvalidDrop) {
       this.consecutiveMisses[this.activePlayer]++;
-      this.activePlayer = opponent;
+      if (!isOpponentStanding) {
+        this.activePlayer = opponent;
+      }
       console.log(`Invalid Drop occurred! Turn transitions to ${this.activePlayer}`);
     } else if (anyValidScore) {
       this.consecutiveMisses[this.activePlayer] = 0;
@@ -364,13 +431,23 @@ export class GameEngine {
     } else {
       // Miss
       this.consecutiveMisses[this.activePlayer]++;
-      this.activePlayer = opponent;
+      if (!isOpponentStanding) {
+        this.activePlayer = opponent;
+      }
       console.log(`Miss. Turn transitions to ${this.activePlayer}`);
     }
 
     // Update HUD counters
     if (this.renderer) {
       this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+    }
+
+    // Forced Showdown check: both players have exactly 5 cards
+    const p1Hand = this.hands[this.player1Name] || [];
+    const p2Hand = this.hands[this.player2Name] || [];
+    if (p1Hand.length === 5 && p2Hand.length === 5) {
+      this.triggerShowdown();
+      return;
     }
 
     // 3-Miss Elimination Rule
@@ -389,12 +466,17 @@ export class GameEngine {
    */
   promptSuitMapping(player, pocketId, ballId) {
     return new Promise((resolve) => {
-      this.controls.enabled = false;
-      const container = document.getElementById('game-container') || document.body;
-
       const claimedSuits = this.pocketSuits.filter(s => s !== null && s !== 'W');
       const allSuits = ['S', 'H', 'D', 'C'];
       const remainingSuits = allSuits.filter(s => !claimedSuits.includes(s));
+
+      if (remainingSuits.length === 1) {
+        resolve(remainingSuits[0]);
+        return;
+      }
+
+      this.controls.enabled = false;
+      const container = document.getElementById('game-container') || document.body;
 
       const overlay = document.createElement('div');
       overlay.className = 'suit-mapping-overlay';
@@ -407,8 +489,30 @@ export class GameEngine {
       const pocketName = pocketNames[pocketId] || `Pocket ${pocketId}`;
       const ballName = ballId === 1 ? 'Ace' : ballId === 11 ? 'Jack' : ballId === 12 ? 'Queen' : ballId === 13 ? 'King' : ballId;
 
+      // Coordinate mapping to position overlay next to pocket
+      const xCenter = this.config.table.xCenter;
+      const yCenter = this.config.table.yCenter;
+      const width = this.config.table.width;
+      const height = this.config.table.height;
+      const sideOffset = this.config.pocket.sideOffset;
+      const hw = width / 2;
+      const hh = height / 2;
+      
+      const pocketPositions = [
+        { x: xCenter - hw, y: yCenter - hh, cls: 'top-left' },      // 0: TL
+        { x: xCenter + hw, y: yCenter - hh, cls: 'top-right' },     // 1: TR
+        { x: xCenter - hw, y: yCenter + hh, cls: 'bottom-left' },   // 2: BL
+        { x: xCenter + hw, y: yCenter + hh, cls: 'bottom-right' },  // 3: BR
+        { x: xCenter, y: yCenter - hh - sideOffset, cls: 'top-side' },    // 4: ST
+        { x: xCenter, y: yCenter + hh + sideOffset, cls: 'bottom-side' }  // 5: SB
+      ];
+
+      const pos = pocketPositions[pocketId] || { x: 512, y: 338, cls: '' };
+      const left = (pos.x / 10.24).toFixed(1);
+      const top = (pos.y / 5.76).toFixed(1);
+
       overlay.innerHTML = `
-        <div class="suit-mapping-card">
+        <div class="suit-mapping-card ${pos.cls}" style="position: absolute; left: ${left}%; top: ${top}%;">
           <h2 class="suit-mapping-title">CLAIM SUIT</h2>
           <p class="suit-mapping-subtitle">${player.toUpperCase()} pocketed [${ballName}] in the ${pocketName}!<br>Map a suit to this pocket:</p>
           <div class="suit-buttons-grid">
@@ -456,43 +560,66 @@ export class GameEngine {
       this.controls.enabled = false;
       const container = document.getElementById('game-container') || document.body;
 
+      // Merge hands of both players to determine occupied cards in play (strict duplicate prevention)
+      const occupiedCards = [
+        ...(this.hands[this.player1Name] || []),
+        ...(this.hands[this.player2Name] || [])
+      ];
+
+      const isOccupied = (r, s) => occupiedCards.some(c => c.rank === r && c.suit === s);
+      const suits = ['S', 'H', 'D', 'C'];
+      const allSuitsOccupied = (r) => suits.every(s => isOccupied(r, s));
+
+      // Find first available valid card combination to set as default
+      let selectedRank = null;
+      let selectedSuit = null;
+      let foundDefault = false;
+      for (let r = 1; r <= 13; r++) {
+        for (const s of suits) {
+          if (!isOccupied(r, s)) {
+            selectedRank = r;
+            selectedSuit = s;
+            foundDefault = true;
+            break;
+          }
+        }
+        if (foundDefault) break;
+      }
+
       const overlay = document.createElement('div');
       overlay.className = 'wildcard-selector-overlay';
 
+      const rankNames = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+      let ranksHtml = '';
+      for (let r = 1; r <= 13; r++) {
+        const label = rankNames[r] || r.toString();
+        const isDisabled = allSuitsOccupied(r);
+        ranksHtml += `<button class="wild-rank-btn" data-rank="${r}" ${isDisabled ? 'disabled' : ''}>${label}</button>`;
+      }
+
       overlay.innerHTML = `
-        <div class="wildcard-selector-card" style="max-width: 420px;">
-          <h2 class="suit-mapping-title" style="color: #ffd700; text-shadow: 0 0 15px rgba(255, 215, 0, 0.6);">WILDCARD!</h2>
-          <p class="suit-mapping-subtitle">${player.toUpperCase()} scored in a Wild Pocket!<br>Customize your Wildcard card:</p>
+        <div class="wildcard-selector-card">
+          <h2 class="suit-mapping-title" style="color: #ffd700; text-shadow: 0 0 15px rgba(255, 215, 0, 0.6); margin-bottom: 5px;">WILDCARD CREATOR</h2>
+          <p class="suit-mapping-subtitle" style="margin-bottom: 12px;">${player.toUpperCase()} hit a Wild Pocket!<br>Design your custom wildcard (no duplicates allowed):</p>
           
-          <div style="display: flex; gap: 15px; margin-bottom: 25px; width: 100%;">
-            <div style="flex: 1; text-align: left;">
-              <label style="color: #90caf9; font-size: 11px; font-weight: 700; letter-spacing: 1px; display: block; margin-bottom: 6px;">SELECT RANK</label>
-              <select id="wild-rank-select" style="width: 100%; background: #0b0f19; border: 2px solid #213359; border-radius: 8px; color: white; padding: 10px; font-size: 14px; outline: none; cursor: pointer;">
-                <option value="1">Ace (A)</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-                <option value="6">6</option>
-                <option value="7">7</option>
-                <option value="8">8</option>
-                <option value="9">9</option>
-                <option value="10">10</option>
-                <option value="11">Jack (J)</option>
-                <option value="12">Queen (Q)</option>
-                <option value="13">King (K)</option>
-              </select>
+          <!-- Live Preview Card -->
+          <div class="wild-card-preview-container">
+            <div id="wild-card-preview" class="wild-card-preview">
+              <!-- Rendered dynamically -->
             </div>
-            
-            <div style="flex: 1; text-align: left;">
-              <label style="color: #90caf9; font-size: 11px; font-weight: 700; letter-spacing: 1px; display: block; margin-bottom: 6px;">SELECT SUIT</label>
-              <select id="wild-suit-select" style="width: 100%; background: #0b0f19; border: 2px solid #213359; border-radius: 8px; color: white; padding: 10px; font-size: 14px; outline: none; cursor: pointer;">
-                <option value="S">Spades (♠)</option>
-                <option value="H">Hearts (♥)</option>
-                <option value="D">Diamonds (♦)</option>
-                <option value="C">Clubs (♣)</option>
-              </select>
-            </div>
+          </div>
+          
+          <!-- Ranks Grid -->
+          <div class="wild-ranks-grid">
+            ${ranksHtml}
+          </div>
+          
+          <!-- Suits Selector Row -->
+          <div class="wild-suits-row">
+            <button class="wild-suit-btn spades" data-suit="S">♠</button>
+            <button class="wild-suit-btn hearts" data-suit="H">♥</button>
+            <button class="wild-suit-btn diamonds" data-suit="D">♦</button>
+            <button class="wild-suit-btn clubs" data-suit="C">♣</button>
           </div>
           
           <button id="wild-confirm-btn" style="background: linear-gradient(135deg, #ffd700 0%, #ffb300 100%); color: #0d1527; border: none; border-radius: 8px; padding: 12px 25px; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.25s; width: 100%; box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4); letter-spacing: 1px;">
@@ -502,21 +629,282 @@ export class GameEngine {
       `;
       container.appendChild(overlay);
 
+      // DOM functions for updating selections
+      const updateCardPreview = () => {
+        const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
+        const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+        
+        const symbol = suitSymbols[selectedSuit];
+        const rankLabel = rankSymbols[selectedRank] || selectedRank.toString();
+        const isRed = selectedSuit === 'H' || selectedSuit === 'D';
+        
+        const previewCard = overlay.querySelector('#wild-card-preview');
+        if (previewCard) {
+          previewCard.className = `wild-card-preview ${isRed ? 'red-suit' : ''}`;
+          previewCard.innerHTML = `
+            <div class="preview-top">${rankLabel}</div>
+            <div class="preview-center">${symbol}</div>
+            <div class="preview-top" style="transform: rotate(180deg); align-self: flex-end;">${rankLabel}</div>
+          `;
+        }
+      };
+
+      const updateSuitButtons = () => {
+        const buttons = overlay.querySelectorAll('.wild-suit-btn');
+        buttons.forEach(btn => {
+          const s = btn.getAttribute('data-suit');
+          const occupied = isOccupied(selectedRank, s);
+          if (occupied) {
+            btn.disabled = true;
+            btn.classList.remove('selected');
+          } else {
+            btn.disabled = false;
+            if (s === selectedSuit) {
+              btn.classList.add('selected');
+            } else {
+              btn.classList.remove('selected');
+            }
+          }
+        });
+      };
+
+      const selectRank = (r) => {
+        selectedRank = r;
+        
+        // Update rank button active styles
+        overlay.querySelectorAll('.wild-rank-btn').forEach(btn => {
+          const rVal = parseInt(btn.getAttribute('data-rank'));
+          if (rVal === selectedRank) {
+            btn.classList.add('selected');
+          } else {
+            btn.classList.remove('selected');
+          }
+        });
+        
+        // If current suit is occupied for the new rank, auto-switch to first available
+        if (isOccupied(selectedRank, selectedSuit)) {
+          selectedSuit = suits.find(s => !isOccupied(selectedRank, s));
+        }
+        
+        updateSuitButtons();
+        updateCardPreview();
+      };
+
+      const selectSuit = (s) => {
+        if (isOccupied(selectedRank, s)) return;
+        selectedSuit = s;
+        updateSuitButtons();
+        updateCardPreview();
+      };
+
+      // Add event listeners to rank buttons
+      overlay.querySelectorAll('.wild-rank-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const r = parseInt(btn.getAttribute('data-rank'));
+          selectRank(r);
+        });
+      });
+      
+      // Add event listeners to suit buttons
+      overlay.querySelectorAll('.wild-suit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const s = btn.getAttribute('data-suit');
+          selectSuit(s);
+        });
+      });
+
+      // Initialize defaults
+      if (selectedRank !== null && selectedSuit !== null) {
+        selectRank(selectedRank);
+      }
+
       const confirmBtn = overlay.querySelector('#wild-confirm-btn');
       confirmBtn.addEventListener('click', () => {
-        const rank = parseInt(overlay.querySelector('#wild-rank-select').value);
-        const suit = overlay.querySelector('#wild-suit-select').value;
+        if (selectedRank === null || selectedSuit === null || isOccupied(selectedRank, selectedSuit)) return;
         
         overlay.style.opacity = '0';
         setTimeout(() => {
           overlay.remove();
           this.controls.enabled = true;
-          resolve({ rank, suit });
+          resolve({ rank: selectedRank, suit: selectedSuit });
         }, 350);
       });
     });
   }
 
+
+  /**
+   * Opens standard 5-card swap HTML modal overlay.
+   * Prompts the active player to choose exactly 1 card to discard from their 6 cards.
+   * @param {string} player The active player's name
+   * @returns {Promise<void>}
+   */
+  promptCardSwap(player) {
+    return new Promise((resolve) => {
+      this.controls.enabled = false;
+      const container = document.getElementById('game-container') || document.body;
+
+      const hand = this.hands[player];
+      if (!hand || hand.length <= 5) {
+        this.controls.enabled = true;
+        resolve();
+        return;
+      }
+
+      const overlay = document.createElement('div');
+      overlay.className = 'card-swap-overlay';
+
+      const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
+      const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+
+      let cardsHtml = '';
+      hand.forEach((card, idx) => {
+        const symbol = suitSymbols[card.suit];
+        const rankLabel = rankSymbols[card.rank] || card.rank.toString();
+        const isRed = card.suit === 'H' || card.suit === 'D';
+        cardsHtml += `
+          <div class="swap-card-item ${isRed ? 'red-suit' : ''}" data-index="${idx}">
+            <div class="preview-top">${rankLabel}</div>
+            <div class="preview-center">${symbol}</div>
+            <div class="preview-top" style="transform: rotate(180deg); align-self: flex-end;">${rankLabel}</div>
+          </div>
+        `;
+      });
+
+      overlay.innerHTML = `
+        <div class="card-swap-card">
+          <h2 class="suit-mapping-title" style="color: #00e5ff; text-shadow: 0 0 15px rgba(0, 229, 255, 0.6); margin-bottom: 5px;">DISCARD CARD</h2>
+          <p class="suit-mapping-subtitle" style="margin-bottom: 15px;">${player.toUpperCase()} has 6 cards in hand.<br>Choose exactly 1 card to discard permanently:</p>
+          <div class="swap-cards-grid">
+            ${cardsHtml}
+          </div>
+          <button id="swap-confirm-btn" style="background: linear-gradient(135deg, #00e5ff 0%, #00b0ff 100%); color: #0d1527; border: none; border-radius: 8px; padding: 12px 25px; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.25s; width: 100%; box-shadow: 0 4px 15px rgba(0, 229, 255, 0.4); letter-spacing: 1px; margin-top: 20px;">
+            CONFIRM DISCARD
+          </button>
+        </div>
+      `;
+      container.appendChild(overlay);
+
+      // Select first card by default
+      let selectedIdx = 0;
+      const cardElements = overlay.querySelectorAll('.swap-card-item');
+      if (cardElements.length > 0) {
+        cardElements[0].classList.add('selected');
+      }
+
+      cardElements.forEach(elem => {
+        elem.addEventListener('click', () => {
+          cardElements.forEach(e => e.classList.remove('selected'));
+          elem.classList.add('selected');
+          selectedIdx = parseInt(elem.getAttribute('data-index'));
+        });
+      });
+
+      const confirmBtn = overlay.querySelector('#swap-confirm-btn');
+      confirmBtn.addEventListener('click', () => {
+        if (selectedIdx < 0 || selectedIdx >= hand.length) return;
+        
+        // Remove the selected card from hand
+        hand.splice(selectedIdx, 1);
+
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+          overlay.remove();
+          this.controls.enabled = true;
+          if (this.renderer) {
+            this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+          }
+          resolve();
+        }, 350);
+      });
+    });
+  }
+
+  /**
+   * Puts player into voluntary stand state.
+   * Locks player controls, resets lasers, and starts a 3-shot countdown for opponent.
+   * @param {string} player The standing player's name
+   */
+  triggerStand(player) {
+    if (this.gameEnded) return;
+    const hand = this.hands[player];
+    if (!hand || hand.length !== 5) {
+      console.warn(`Cannot stand. ${player} does not have exactly 5 cards.`);
+      return;
+    }
+
+    console.log(`${player} decided to voluntary stand!`);
+    this.handsStood[player] = true;
+    this.standingPlayer = player;
+    
+    if (!this.firstToStand) {
+      this.firstToStand = player;
+    }
+
+    const opponent = player === this.player1Name ? this.player2Name : this.player1Name;
+
+    // Double stand check: if opponent has already stood or stands now, trigger showdown immediately!
+    if (this.handsStood[opponent]) {
+      this.triggerShowdown();
+      return;
+    }
+
+    // Set countdown to 3 shots for opponent
+    this.standCountdown = this.config.rules.standCountdownTurns;
+
+    // Set turn to opponent immediately
+    this.activePlayer = opponent;
+
+    // Lock aiming lasers or disable controls for standing player (they don't shoot anymore)
+    if (this.renderer) {
+      this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+      this.renderer.setActivePlayer(this.activePlayer);
+    }
+
+    console.log(`Stand countdown started. ${opponent} has 3 shots to optimize their hand.`);
+  }
+
+  /**
+   * Collects both card hands, runs the standard 5-card poker evaluator,
+   * compares hands with kicker tiebreaker, and displays the game over screen.
+   */
+  triggerShowdown() {
+    if (this.gameEnded) return;
+    this.gameEnded = true;
+
+    if (this.controls) {
+      this.controls.enabled = false;
+    }
+
+    const handA = this.hands[this.player1Name] || [];
+    const handB = this.hands[this.player2Name] || [];
+
+    const result = compareHands(handA, handB, this.standingPlayer, this.firstToStand, this.firstToCompleteHand);
+    
+    const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
+    const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+
+    const getHandStr = (hand) => {
+      if (hand.length === 0) return "Empty Hand";
+      return hand.map(c => {
+        const symbol = suitSymbols[c.suit] || c.suit;
+        const rankLabel = rankSymbols[c.rank] || c.rank.toString();
+        return `${rankLabel}${symbol}`;
+      }).join(', ');
+    };
+
+    const details = `
+      <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.15); padding-top: 15px; text-align: left; font-family: monospace; font-size: 12px; color: #a0aab8;">
+        <div style="margin-bottom: 8px;"><strong style="color: #00e5ff;">Alice's Hand:</strong> ${getHandStr(handA)}<br><span style="color: #64b5f6;">(${result.labelA})</span></div>
+        <div style="margin-bottom: 8px;"><strong style="color: #e040fb;">Bob's Hand:</strong> ${getHandStr(handB)}<br><span style="color: #ba68c8;">(${result.labelB})</span></div>
+        <div style="margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; color: #ffd700; font-weight: bold; text-align: center;">${result.reason}</div>
+      </div>
+    `;
+
+    const winnerName = result.winner === 'A' ? this.player1Name : this.player2Name;
+    
+    this.showGameOver(winnerName, details);
+  }
 
   /**
    * Opens static HTML overlay for final Match Over.
