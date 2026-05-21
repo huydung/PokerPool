@@ -43,8 +43,27 @@ export class AimingControls {
     this._hasBallInHand = val;
     if (val) {
       this.showBallInHandUI();
+      // Disable cue ball physical collisions with other balls during Ball-in-Hand.
+      // Category 0x0001 = balls, 0x0002 = cushions/static.
+      // By setting mask to 0x0000 we make the cue ball a ghost — no physical contacts.
+      const cueBall = this.physics?.cueBall;
+      if (cueBall) {
+        // Save original filter so we can restore it precisely
+        this._savedCollisionFilter = { ...cueBall.collisionFilter };
+        Matter.Body.set(cueBall, {
+          collisionFilter: { category: 0x0001, mask: 0x0000, group: 0 }
+        });
+      }
     } else {
       this.hideBallInHandUI();
+      // Restore full collision participation when Ball-in-Hand ends
+      const cueBall = this.physics?.cueBall;
+      if (cueBall) {
+        Matter.Body.set(cueBall, {
+          collisionFilter: this._savedCollisionFilter || { category: 0x0001, mask: 0xFFFFFFFF, group: 0 }
+        });
+        this._savedCollisionFilter = null;
+      }
     }
   }
 

@@ -27,6 +27,8 @@ export class PhysicsEngine {
     this.cueBall = null;
     this.isBreakShot = true;
     this.cushionContactSet = new Set(); // Track which target balls contact cushions during a shot
+    /** @type {AimingControls|null} Reference to the controls instance for BIH state checks */
+    this.controls = null;
 
     // Callbacks for hooks
     /** @type {function(Matter.Body, Matter.Body): void} Callback when a ball enters a pocket */
@@ -249,6 +251,13 @@ export class PhysicsEngine {
     const subDt = dt / subSteps;
     for (let i = 0; i < subSteps; i++) {
       Matter.Engine.update(this.engine, subDt);
+    }
+
+    // During Ball-in-Hand: hard-clamp cue ball velocity to zero every tick so it stays
+    // exactly where the player positioned it, preventing physics-induced drift.
+    if (this.controls?.hasBallInHand && this.cueBall) {
+      Matter.Body.setVelocity(this.cueBall, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(this.cueBall, 0);
     }
 
     // Limit maximum speed of dynamic bodies to avoid tunneling errors

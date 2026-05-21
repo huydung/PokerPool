@@ -42,6 +42,9 @@ async function initSandbox() {
   // 4. Attach interactive mouse/touch cue aiming controls
   const controls = new AimingControls(renderer.app.canvas, physics, CONFIG);
 
+  // Wire controls back into physics so physics.update() can check BIH state
+  physics.controls = controls;
+
   // Start the match by triggering the virtual coin toss
   await game.startMatch(controls, renderer);
 
