@@ -27,10 +27,16 @@ export class CanvasRenderer {
     
     // Pocket graphic references for diagnostic glowing
     this.pocketGraphics = [];
+    this.pocketSuits = new Array(6).fill(null);
+    this.gameRef = null;
     
     // HUD element references
     this.player1HandGraphics = [];
     this.player2HandGraphics = [];
+    this.p1CardsContainer = null;
+    this.p2CardsContainer = null;
+    this.player1ScoreText = null;
+    this.player2ScoreText = null;
     this.activePlayerText = null;
 
     // Laser overlay graphics
@@ -40,7 +46,9 @@ export class CanvasRenderer {
     this.sliderGraphics = new Graphics();
 
     // Active Player Turn Name tracking
-    this.activePlayerName = this.config.rules?.player1Name || 'Alice';
+    this.player1Name = this.config.rules?.player1Name || 'Alice';
+    this.player2Name = this.config.rules?.player2Name || 'Bob';
+    this.activePlayerName = this.player1Name;
   }
 
   /**
@@ -171,7 +179,10 @@ export class CanvasRenderer {
       rim.fill({ color: colors.pocketBg });
       pocketView.addChild(rim);
 
-      this.pocketGraphics.push({ container: pocketView, glow, rim, type: pos.type });
+      const suitContainer = new Container();
+      pocketView.addChild(suitContainer);
+
+      this.pocketGraphics.push({ container: pocketView, glow, rim, suitContainer, type: pos.type });
       this.tableContainer.addChild(pocketView);
     });
   }
@@ -214,6 +225,7 @@ export class CanvasRenderer {
     const p1Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
     p1Score.y = 20;
     p1Container.addChild(p1Score);
+    this.player1ScoreText = p1Score;
 
     // Render 5 empty card slot outlines for Player 1
     for (let i = 0; i < 5; i++) {
@@ -224,6 +236,12 @@ export class CanvasRenderer {
       p1Container.addChild(cardSlot);
       this.player1HandGraphics.push(cardSlot);
     }
+
+    this.p1CardsContainer = new Container();
+    this.p1CardsContainer.x = 0;
+    this.p1CardsContainer.y = 42;
+    p1Container.addChild(this.p1CardsContainer);
+
     this.hudContainer.addChild(p1Container);
 
     // 2. Player 2 Info Panel
@@ -237,6 +255,7 @@ export class CanvasRenderer {
     const p2Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
     p2Score.y = 20;
     p2Container.addChild(p2Score);
+    this.player2ScoreText = p2Score;
 
     // Render 5 empty card slot outlines for Player 2
     for (let i = 0; i < 5; i++) {
@@ -247,6 +266,12 @@ export class CanvasRenderer {
       p2Container.addChild(cardSlot);
       this.player2HandGraphics.push(cardSlot);
     }
+
+    this.p2CardsContainer = new Container();
+    this.p2CardsContainer.x = 0;
+    this.p2CardsContainer.y = 42;
+    p2Container.addChild(this.p2CardsContainer);
+
     this.hudContainer.addChild(p2Container);
 
     // 3. Center Status Panel (Turn indicator)
@@ -621,5 +646,165 @@ export class CanvasRenderer {
         alpha: alpha
       });
     }
+  }
+
+  /**
+   * Redraws pocket rims and suit symbols when suits are claimed or converted to wild pockets.
+   * @param {Array<string|null>} pocketSuits Pocket mappings array of length 6
+   */
+  updatePocketGraphics(pocketSuits) {
+    this.pocketSuits = pocketSuits;
+
+    this.pocketGraphics.forEach((g, idx) => {
+      const suit = pocketSuits[idx];
+      g.suitContainer.removeChildren();
+
+      // Determine rim stroke color based on suit mapping
+      let color = this.config.visuals.colors.pocketBorder || 0x424242; // default unmapped
+      let glowColor = this.config.visuals.pockets.unclaimed || 0xffeb3b; // default unclaimed yellow
+      let glowAlpha = 0.2; // default unclaimed glow alpha
+
+      if (suit !== null) {
+        glowAlpha = 0.1; // dim representation for active state
+        if (suit === 'W') {
+          color = 0xffd700; // Gold for Wild
+          glowColor = 0xffd700;
+        } else if (suit === 'S') {
+          color = 0x00e5ff; // Neon Cyan
+          glowColor = 0x00e5ff;
+        } else if (suit === 'H') {
+          color = 0xff1744; // Neon Red
+          glowColor = 0xff1744;
+        } else if (suit === 'D') {
+          color = 0xff9100; // Neon Orange
+          glowColor = 0xff9100;
+        } else if (suit === 'C') {
+          color = 0x00e676; // Neon Green
+          glowColor = 0x00e676;
+        }
+      }
+
+      // Redraw the rim border
+      g.rim.clear();
+      g.rim.circle(0, 0, this.config.pocket.radius + 1);
+      g.rim.stroke({ color: color, width: 3 });
+      g.rim.circle(0, 0, this.config.pocket.radius);
+      g.rim.fill({ color: this.config.visuals.colors.pocketBg || 0x11192e });
+
+      // Redraw the glow indicator statically representing state
+      g.glow.clear();
+      g.glow.circle(0, 0, this.config.pocket.radius + 3);
+      g.glow.fill({ color: glowColor, alpha: glowAlpha });
+
+      // Draw suit symbol / star text inside pocket
+      if (suit !== null) {
+        const symbols = { S: '♠', H: '♥', D: '♦', C: '♣', W: '★' };
+        const symbolText = symbols[suit] || '';
+
+        const style = new TextStyle({
+          fontFamily: 'Inter, Arial, sans-serif',
+          fontSize: 18,
+          fontWeight: 'bold',
+          fill: color
+        });
+
+        const text = new Text({ text: symbolText, style: style });
+        text.anchor.set(0.5);
+        text.x = 0;
+        text.y = 0;
+        g.suitContainer.addChild(text);
+      }
+    });
+  }
+
+  /**
+   * Renders a styled mini card graphic on the HUD player panels.
+   */
+  renderCardOnHUD(container, card, idx) {
+    const cardView = new Container();
+    cardView.x = idx * 40;
+
+    // White backdrop
+    const base = new Graphics();
+    base.roundRect(0, 0, 32, 46, 4);
+    base.fill({ color: 0xffffff });
+    base.stroke({ color: 0x00e5ff, width: 1.5 });
+    cardView.addChild(base);
+
+    // Text details (rank and suit symbol)
+    const rankStr = card.rank === 1 ? 'A' : card.rank === 11 ? 'J' : card.rank === 12 ? 'Q' : card.rank === 13 ? 'K' : card.rank.toString();
+    const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
+    const suitStr = suitSymbols[card.suit] || '';
+
+    const isRed = card.suit === 'H' || card.suit === 'D';
+    const fillStyle = isRed ? 0xd32f2f : 0x212121;
+
+    const rankStyle = new TextStyle({
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: 12,
+      fontWeight: 'bold',
+      fill: fillStyle
+    });
+
+    const rankText = new Text({ text: rankStr, style: rankStyle });
+    rankText.anchor.set(0.5);
+    rankText.x = 16;
+    rankText.y = 15;
+    cardView.addChild(rankText);
+
+    const suitStyle = new TextStyle({
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: 16,
+      fontWeight: 'bold',
+      fill: fillStyle
+    });
+
+    const suitText = new Text({ text: suitStr, style: suitStyle });
+    suitText.anchor.set(0.5);
+    suitText.x = 16;
+    suitText.y = 31;
+    cardView.addChild(suitText);
+
+    container.addChild(cardView);
+  }
+
+  /**
+   * Synchronizes HUD display of player cards, consecutive miss counters, and turn active labels.
+   */
+  updateHUD(hands, activePlayer, consecutiveMisses) {
+    // 1. Clear card containers
+    if (this.p1CardsContainer) this.p1CardsContainer.removeChildren();
+    if (this.p2CardsContainer) this.p2CardsContainer.removeChildren();
+
+    const p1Hand = hands[this.player1Name] || [];
+    const p2Hand = hands[this.player2Name] || [];
+
+    // 2. Render cards
+    if (this.p1CardsContainer) {
+      p1Hand.forEach((card, idx) => {
+        this.renderCardOnHUD(this.p1CardsContainer, card, idx);
+      });
+    }
+
+    if (this.p2CardsContainer) {
+      p2Hand.forEach((card, idx) => {
+        this.renderCardOnHUD(this.p2CardsContainer, card, idx);
+      });
+    }
+
+    // 3. Update text headers with cards count and current misses
+    const p1Misses = consecutiveMisses[this.player1Name] || 0;
+    const p2Misses = consecutiveMisses[this.player2Name] || 0;
+
+    if (this.player1ScoreText) {
+      this.player1ScoreText.text = `Hand Cards (${p1Hand.length}/5) - Misses: ${p1Misses}`;
+    }
+
+    if (this.player2ScoreText) {
+      this.player2ScoreText.text = `Hand Cards (${p2Hand.length}/5) - Misses: ${p2Misses}`;
+    }
+
+    // 4. Update the turn text
+    this.setActivePlayer(activePlayer);
   }
 }

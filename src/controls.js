@@ -282,6 +282,8 @@ export class AimingControls {
    * @returns {Object|null} Aiming data or null if not currently aiming
    */
   getAimData() {
+    if (!this.enabled) return null;
+
     // Show aiming line automatically if all balls are stopped (pre-shot continuous hover-aiming)
     const allStopped = this.physics.areAllBallsStopped();
     if (!allStopped || !this.physics.cueBall) return null;
@@ -340,12 +342,57 @@ export class AimingControls {
       }
     }
 
+    let targetedPocketId = -1;
     if (closestTarget && minT !== Infinity) {
       hasHit = true;
       ghostCenter = {
         x: startX + D.x * minT,
         y: startY + D.y * minT
       };
+
+      // Calculate targeting vector to pockets
+      const Tx = closestTarget.position.x;
+      const Ty = closestTarget.position.y;
+      const Gx = ghostCenter.x;
+      const Gy = ghostCenter.y;
+      
+      const Nx = Tx - Gx;
+      const Ny = Ty - Gy;
+      const dist = Math.sqrt(Nx * Nx + Ny * Ny);
+      if (dist > 0.001) {
+        const dx = Nx / dist;
+        const dy = Ny / dist;
+        
+        const pocketRadius = this.config.pocket.radius;
+        const { xCenter, yCenter, width, height } = this.config.table;
+        const { sideOffset } = this.config.pocket;
+        const hw = width / 2;
+        const hh = height / 2;
+        const pocketPositions = [
+          { x: xCenter - hw, y: yCenter - hh }, // 0: TL
+          { x: xCenter + hw, y: yCenter - hh }, // 1: TR
+          { x: xCenter - hw, y: yCenter + hh }, // 2: BL
+          { x: xCenter + hw, y: yCenter + hh }, // 3: BR
+          { x: xCenter, y: yCenter - hh - sideOffset }, // 4: ST
+          { x: xCenter, y: yCenter + hh + sideOffset }  // 5: SB
+        ];
+        
+        let minProj = Infinity;
+        pocketPositions.forEach((pos, idx) => {
+          const Vx = pos.x - Tx;
+          const Vy = pos.y - Ty;
+          const proj = Vx * dx + Vy * dy;
+          if (proj > 0) {
+            const distSq = (Vx * Vx + Vy * Vy) - proj * proj;
+            if (distSq < pocketRadius * pocketRadius) {
+              if (proj < minProj) {
+                minProj = proj;
+                targetedPocketId = idx;
+              }
+            }
+          }
+        });
+      }
     }
 
     return {
@@ -357,7 +404,9 @@ export class AimingControls {
       powerRatio: this.powerRatio,
       hasHit,
       ghostCenter,
-      targetCenter: closestTarget ? { x: closestTarget.position.x, y: closestTarget.position.y } : null
+      targetCenter: closestTarget ? { x: closestTarget.position.x, y: closestTarget.position.y } : null,
+      targetBallId: closestTarget ? closestTarget.plugin.ballId : -1,
+      targetedPocketId
     };
   }
 

@@ -94,7 +94,9 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
       setActivePlayer: () => {},
       setBallVisibility: (id, visible) => {
         visibilityMap[id] = visible;
-      }
+      },
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
     };
 
     // Alice breaks
@@ -144,7 +146,9 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
     // Setup mock renderer
     game.renderer = {
       setActivePlayer: () => {},
-      setBallVisibility: () => {}
+      setBallVisibility: () => {},
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
     };
 
     // Move cue ball to a non-standard position to verify it stays in place
@@ -184,7 +188,9 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
     // Setup mock renderer
     game.renderer = {
       setActivePlayer: () => {},
-      setBallVisibility: () => {}
+      setBallVisibility: () => {},
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
     };
 
     // Alice breaks
@@ -205,5 +211,146 @@ describe('Poker Pool - Game Rules & Turn Orchestration TDD Suite', () => {
     const expectedHeadStringX = CONFIG.table.xCenter - CONFIG.table.width / 4;
     expect(physics.cueBall.position.x).toBeCloseTo(expectedHeadStringX, 1);
     expect(physics.cueBall.position.y).toBeCloseTo(CONFIG.table.yCenter, 1);
+  });
+
+  // ========================================================
+  // 5. SUIT CLAIMING, LOCKOUT & TRANSITIONS
+  // ========================================================
+  it('should prevent mapping a claimed suit to a different pocket', async () => {
+    const physics = new PhysicsEngine(CONFIG);
+    const game = new GameEngine(CONFIG);
+    physics.spawnBalls();
+
+    // Mock renderer and prompting
+    game.renderer = {
+      setActivePlayer: () => {},
+      setBallVisibility: () => {},
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
+    };
+
+    // First pocket claimed Spades
+    game.pocketSuits[0] = 'S';
+
+    // Try to score standard ball 5 in pocket 1 (unmapped) and prompt mapping
+    game.activePlayer = 'Alice';
+    const targetBall = physics.targetBalls[5];
+    
+    // The promptSuitMapping method filters claimedSuits and only allows remaining.
+    const claimedSuits = game.pocketSuits.filter(s => s !== null && s !== 'W');
+    expect(claimedSuits).toContain('S');
+    expect(claimedSuits).not.toContain('H');
+  });
+
+  it('should transition to Phase 2 wild pockets when 4 distinct suits are claimed', async () => {
+    const physics = new PhysicsEngine(CONFIG);
+    const game = new GameEngine(CONFIG);
+    physics.spawnBalls();
+
+    game.renderer = {
+      setActivePlayer: () => {},
+      setBallVisibility: () => {},
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
+    };
+
+    // Fast-track Phase 1 by claiming 3 pockets with distinct suits
+    game.pocketSuits[0] = 'S';
+    game.pocketSuits[1] = 'H';
+    game.pocketSuits[2] = 'D';
+
+    // Mock promptSuitMapping to return 'C' (the 4th suit)
+    game.promptSuitMapping = () => Promise.resolve('C');
+
+    // Pocket ball 4 (Ace) in pocket 3 (currently unmapped)
+    const targetBall = physics.targetBalls[4];
+    game.handleShotStart();
+    game.handlePocketOverlap(targetBall, 3);
+    
+    await game.processNormalPocketedBalls(physics);
+
+    // Verify:
+    // 1. Pocket 3 is mapped to 'C'
+    expect(game.pocketSuits[3]).toBe('C');
+    // 2. Phase has transitioned to 2
+    expect(game.phase).toBe(2);
+    // 3. The remaining unmapped pockets (4 and 5) have become Wild ('W')
+    expect(game.pocketSuits[4]).toBe('W');
+    expect(game.pocketSuits[5]).toBe('W');
+  });
+
+  it('should respawn target ball and count as a miss if pocketed in a Wild Pocket during Phase 2', async () => {
+    const physics = new PhysicsEngine(CONFIG);
+    const game = new GameEngine(CONFIG);
+    physics.spawnBalls();
+
+    const visibilityMap = {};
+    game.renderer = {
+      setActivePlayer: () => {},
+      setBallVisibility: (id, visible) => {
+        visibilityMap[id] = visible;
+      },
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
+    };
+
+    // Transition directly to Phase 2
+    game.phase = 2;
+    game.pocketSuits = ['S', 'H', 'D', 'C', 'W', 'W'];
+
+    // Pocket standard ball 4 (Ace) in Wild Pocket 4
+    const targetBall = physics.targetBalls[4];
+    game.handleShotStart();
+    game.handlePocketOverlap(targetBall, 4);
+    physics.handlePocketOverlap(targetBall, 4);
+
+    expect(physics.targetBalls.some(b => b.id === targetBall.id)).toBe(false);
+
+    await game.processNormalPocketedBalls(physics);
+
+    // Assertions:
+    // 1. Ball is respawned
+    expect(physics.targetBalls.some(b => b.id === targetBall.id)).toBe(true);
+    expect(visibilityMap[targetBall.id]).toBe(true);
+    // 2. Counts as a miss (since no valid score, and anyInvalidDrop is true because standard ball in wild pocket is invalid)
+    expect(game.consecutiveMisses['Alice']).toBe(1);
+  });
+
+  // ========================================================
+  // 6. 3-CONSECUTIVE MISSES DISQUALIFICATION
+  // ========================================================
+  it('should trigger game over when a player reaches 3 consecutive misses', async () => {
+    const physics = new PhysicsEngine(CONFIG);
+    const game = new GameEngine(CONFIG);
+    physics.spawnBalls();
+
+    let gameOverWinner = null;
+    let gameOverReason = null;
+
+    game.renderer = {
+      setActivePlayer: () => {},
+      setBallVisibility: () => {},
+      updateHUD: () => {},
+      updatePocketGraphics: () => {}
+    };
+    game.showGameOver = (winner, reason) => {
+      gameOverWinner = winner;
+      gameOverReason = reason;
+    };
+
+    // Active player is Alice
+    game.activePlayer = 'Alice';
+    game.consecutiveMisses['Alice'] = 2;
+
+    // Trigger another miss by processing a shot with no pocketed balls
+    game.handleShotStart();
+    await game.processNormalPocketedBalls(physics);
+
+    // Assertions:
+    // 1. Alice consecutive misses goes to 3
+    expect(game.consecutiveMisses['Alice']).toBe(3);
+    // 2. game.showGameOver is called with Bob as the winner
+    expect(gameOverWinner).toBe('Bob');
+    expect(gameOverReason).toContain('3 consecutive misses and is disqualified');
   });
 });

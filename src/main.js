@@ -28,7 +28,8 @@ async function initSandbox() {
 
   // Set up pocket overlap hook to sync physics with visual views and game state rules
   physics.onPocketOverlap = (ball, pocket) => {
-    game.handlePocketOverlap(ball);
+    const pocketId = pocket.plugin?.pocketId !== undefined ? pocket.plugin.pocketId : -1;
+    game.handlePocketOverlap(ball, pocketId);
     physics.handlePocketOverlap(ball);
     if (ball.label !== 'cue_ball') {
       renderer.setBallVisibility(ball.id, false);
