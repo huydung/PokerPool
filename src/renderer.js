@@ -52,6 +52,10 @@ export class CanvasRenderer {
     // Slider overlay graphics
     this.sliderGraphics = new Graphics();
 
+    // Callback fired when the Stand button is clicked.
+    // Set by GameEngine.startMatch — avoids renderer reaching into gameRef for this action.
+    this.onStandRequested = null;
+
     // Active Player Turn Name tracking
     this.player1Name = this.config.rules?.player1Name || 'Alice';
     this.player2Name = this.config.rules?.player2Name || 'Bob';
@@ -251,7 +255,6 @@ export class CanvasRenderer {
     const bg = new Graphics();
     bg.rect(0, 0, this.config.canvas.width, hudHeight);
     bg.fill({ color: 0x11192e, alpha: 0.95 });
-    bg.stroke({ color: 0x22355c, width: 2 });
     this.hudContainer.addChild(bg);
 
     // Fading gradient backgrounds behind player HUD panels but in front of base HUD bg
@@ -555,7 +558,37 @@ export class CanvasRenderer {
     }
   }
 
+  /**
+   * Appends a full-width coloured overlay div that sweeps across the HUD
+   * to signal a player switch. Automatically removes itself after the
+   * CSS animation completes (~600 ms).
+   * @param {string} toPlayer Name of the incoming active player
+   */
+  _triggerHudSweep(toPlayer) {
+    const container = this.containerElement || document.getElementById('game-container');
+    if (!container) return;
+
+    const sweep = document.createElement('div');
+    const isP1 = toPlayer === this.player1Name;
+    sweep.className = isP1 ? 'hud-sweep sweep-left' : 'hud-sweep';
+
+    // Colour the sweep bar to match the incoming player
+    const color = isP1 ? 'rgba(0, 229, 255, 0.45)' : 'rgba(224, 64, 251, 0.45)';
+    sweep.style.background = `linear-gradient(90deg, transparent, ${color}, transparent)`;
+
+    container.appendChild(sweep);
+
+    // Clean up once animation ends (~600 ms)
+    sweep.addEventListener('animationend', () => sweep.remove(), { once: true });
+  }
+
   setActivePlayer(name) {
+    // Detect genuine player switch and fire the sweep animation
+    if (this._lastActivePlayer && this._lastActivePlayer !== name) {
+      this._triggerHudSweep(name);
+    }
+    this._lastActivePlayer = name;
+
     this.activePlayerName = name;
     if (this.activePlayerText) {
       const themeColor = name === this.player1Name ? 0x00e5ff : 0xe040fb;
@@ -1104,43 +1137,32 @@ export class CanvasRenderer {
       }
     }
 
-    // 3b. Manage dynamic HTML STAND button overlays
-    const existingP1Btn = document.getElementById('p1-stand-btn');
-    if (existingP1Btn) existingP1Btn.remove();
-    const existingP2Btn = document.getElementById('p2-stand-btn');
-    if (existingP2Btn) existingP2Btn.remove();
-
-    if (this.gameRef && !this.gameRef.gameEnded) {
-      const container = document.getElementById('game-container') || document.body;
-
-      // Alice Stand Button: active turn, has exactly 5 cards, hasn't stood yet
-      if (activePlayer === this.player1Name && p1Hand.length === 5 && !this.gameRef.handsStood[this.player1Name]) {
-        const btn = document.createElement('button');
-        btn.id = 'p1-stand-btn';
-        btn.className = 'hud-stand-btn p1-stand';
-        btn.innerText = 'STAND';
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this.gameRef.triggerStand(this.player1Name);
-        });
-        container.appendChild(btn);
-      }
-
-      // Bob Stand Button: active turn, has exactly 5 cards, hasn't stood yet
-      if (activePlayer === this.player2Name && p2Hand.length === 5 && !this.gameRef.handsStood[this.player2Name]) {
-        const btn = document.createElement('button');
-        btn.id = 'p2-stand-btn';
-        btn.className = 'hud-stand-btn p2-stand';
-        btn.innerText = 'STAND';
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this.gameRef.triggerStand(this.player2Name);
-        });
-        container.appendChild(btn);
+    // 4. Danger border — light up when active player is on their last heart
+    const maxMisses = this.config.rules?.maxConsecutiveMisses ?? 3;
+    const activeMisses = consecutiveMisses[activePlayer] || 0;
+    const inDanger = activeMisses >= maxMisses - 1; // 1 heart left
+    const gameContainer = document.getElementById('game-container');
+    if (gameContainer) {
+      if (inDanger && this.gameRef && !this.gameRef.gameEnded) {
+        gameContainer.classList.add('danger-mode');
+        // Show/update the persistent warning toast
+        let warnEl = document.getElementById('danger-warning-toast');
+        if (!warnEl) {
+          warnEl = document.createElement('div');
+          warnEl.id = 'danger-warning-toast';
+          warnEl.className = 'danger-warning-toast';
+          const gc = document.getElementById('game-container') || document.body;
+          gc.appendChild(warnEl);
+        }
+        warnEl.textContent = `⚠ ${activePlayer}: Miss this shot and you lose!`;
+      } else {
+        gameContainer.classList.remove('danger-mode');
+        const warnEl = document.getElementById('danger-warning-toast');
+        if (warnEl) warnEl.remove();
       }
     }
 
-    // 4. Update the turn text
+    // 5. Update the turn text
     this.setActivePlayer(activePlayer);
   }
 }

@@ -55,7 +55,7 @@ When a ball drops into an active pocket, its programmatic identity is instantly 
 | Ball State | Pocket Target | Action / Card Registration |
 | --- | --- | --- |
 | **Rank Ball (1-13)** | Unmapped Pocket (Phase 1) | Prompt player to map suit → Register Card → Respawn original ball rank. |
-| **Rank Ball (1-13)** | Mapped Suit Pocket | If player does _not_ already hold this exact Rank + Suit combo → Register Card → Respawn ball rank. |
+| **Rank Ball (1-13)** | Mapped Suit Pocket | If _neither_ player already holds this exact Rank + Suit combo → Register Card → Respawn ball rank. |
 | **Rank Ball (1-13)** | Active Wild Pocket | **Invalid.** Ball immediately teleports to a respawn spot. Turn ends (counts as a miss). |
 | **Wildcard Ball (14-15)** | Active Suit Pocket | **Invalid.** Ball immediately teleports to a respawn spot. Turn ends (counts as a miss). |
 | **Wildcard Ball (14-15)** | Active Wild Pocket | Open rank selector UI (A–K) and suit selector → Add custom card → **Permanently remove ball from play (no respawn).** |
@@ -64,7 +64,7 @@ When a ball drops into an active pocket, its programmatic identity is instantly 
 
 - **Canvas Scale & Aspect Ratio**: The application is built on a fixed **1024 x 576** canvas size (16:9 aspect ratio) with responsive letterboxing (black bars surrounding the canvas on non-16:9 screens) to ensure physics coordinates remain fully deterministic across all displays.
 - **Table Aesthetics**: Styled as a sleek blue felt table with elegant wooden rail borders, matching `gameref.png`.
-- **Advanced Raycast Aiming**: When aiming the cue stick at a target ball, the engine runs a real-time ray-cast. It projects a path from the cue ball, placing a **ghost cue ball** at the exact predicted point of contact with the target ball. No deflection or projection lines are shown — only the ghost ball.
+- **Advanced Raycast Aiming**: When aiming the cue stick at a target ball, the engine runs a real-time ray-cast. It projects a path from the cue ball, placing a **ghost cue ball** at the exact predicted point of contact with the target ball. No deflection lines, target deflection vectors, or pocket glow indicators are rendered — only the ghost ball and the laser origin line.
 - **Precision Aim Lock-In**: Enables players to lock the aiming angle (left-click anywhere on the table for PC/Mouse, or automatically on releasing the finger/pointerup for Mobile/Touch). While locked, moving the cursor to the left power slider does not disrupt the aimed angle. Left-clicking on the table again on PC unlocks the angle. To prevent accidental unlocks, the slider's detection box is dynamically expanded horizontally (up to x = 140) and vertically (covering the entire canvas height) when aim is locked, and a left gutter safety guard ignores any off-target clicks in the left gutter (x < 112) without resetting the lock. For multi-touch safety, secondary pointer inputs are ignored while dragging.
 - **Visual Locked-In Cues**: When the aim is locked, the laser guide line and ghost cue ball outline glow with a high-opacity, thick neon-cyan (`0x00e5ff`) paint, and a glowing ring is rendered around the cue ball (`radius + 4`). When unlocked, standard thin white dashed guides are drawn.
 - **Pocket Rendering**: Pockets display their suit symbol and suit-color rim once claimed. No dynamic glow or color change during aiming.
@@ -123,3 +123,47 @@ In Matter.js, specifying bounciness (`restitution`) in options during static bod
 
 ### Physics-Safe Variable Naming
 To respect architectural boundaries where physics must remain ignorant of card hands, scoring rules, or players, loop iterators handling Matter.js collision arrays (`event.pairs`) are named `collisionPair` instead of the card terminology `pair` to avoid keyword matching in the decoupler test regexes.
+
+---
+
+## 8. Implemented Design Decisions (Post-GDD v1.1 Addenda)
+
+These decisions were made or clarified during active development and supersede or extend the baseline spec where conflicts exist.
+
+### 8.1 Scratch Rule (Clarified)
+A cue ball scratch voids the **entire shot** — not just the cue ball pocket event. All co-pocketed target balls on the same shot respawn immediately, no cards are awarded, no suit mappings are made, and no wildcards are consumed. The scratch victim's consecutive miss counter increments, and their opponent receives Ball-in-Hand. This early-exit behaviour is enforced at the top of `processNormalPocketedBalls` before any card logic runs.
+
+### 8.2 Duplicate Card Rule (Clarified)
+No card (rank + suit combination) may exist in both players' hands simultaneously, at any point in the game. The duplicate check is enforced globally across **both** hands for:
+- Standard rank balls pocketed into mapped suit pockets
+- Standard rank balls pocketed into a previously unmapped pocket (during Phase 1 suit assignment)
+- Wildcard custom card selection in the Wildcard Creator UI
+
+The `promptWildcardSelection` dialog disables rank/suit combinations already held by either player, not just the active player. If a chosen card is already held globally, the ball respawns and the turn ends as a miss.
+
+### 8.3 Aiming Assist (Design Finalization)
+After playtesting, deflection projection lines and pocket glow indicators were removed as they cluttered the visual space and guided players too prescriptively. The final aiming system renders:
+- A dashed laser line from the cue ball toward the target
+- A ghost cue ball outline at the predicted contact point
+- A glowing ring around the cue ball when aim is locked
+No pocket glow, no target ball deflection lines, no cue deflection lines.
+
+### 8.4 Ball-in-Hand Overlap Guard
+During the Ball-in-Hand placement phase, the cue ball cannot be placed at a position that overlaps or touches any other ball on the table. The placement UI validates the proposed position in real time. The Confirm button is disabled (red "⚠ OVERLAPPING BALL" label) while the position is invalid, preventing placement confirmation until a legal position is chosen.
+
+### 8.5 Shot Toast Notifications
+After every shot resolution, a 3-second overlay toast appears just below the HUD summarising the outcome. Five toast types exist:
+- **Score** (green): Valid card earned, bonus turn granted
+- **Scratch** (red): Cue ball pocketed, balls respawned, BIH awarded
+- **Miss** (grey): No balls pocketed, turn passes
+- **Invalid drop** (amber): Duplicate card attempt, ball respawned, miss counted
+- **Mixed** (purple): Valid card scored but also an invalid drop — miss counter resets but turn ends
+
+### 8.6 HUD Active-Player Sweep Animation
+When the active player changes, a full-width gradient bar sweeps across the HUD (100px top area) to signal the handoff visually. Direction encodes the player: sweeping left-to-right signals P2 becoming active (purple), sweeping right-to-left signals P1 becoming active (cyan). The animation fires only on genuine player switches, not on the initial coin-toss assignment.
+
+### 8.7 Rules Reference Modal
+A persistent `?` button anchored to the top center of the HUD (above the centre badge, `z-index: 1002`) opens a full scrollable rules reference overlay at any time during a match. It covers: table layout, pocket mapping, card earning, break rules, Ball-in-Hand, Stand mechanic, DQ rules, and the full poker hand ranking ladder.
+
+### 8.8 Browser-Based Test Suite
+A self-contained `test.html` file (zero external dependencies, no build step required) provides 48 automated tests across 6 suites covering the poker evaluator: hand type detection, kicker comparison, Ace-low wheel detection, cross-rank disambiguation, wildcard-style combinations, and the 5-card hand comparison tiebreaker chain. Open directly in a browser to run.

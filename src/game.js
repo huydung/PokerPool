@@ -58,6 +58,11 @@ export class GameEngine {
     this.phase = 1;
   }
 
+  /** Convenience getter — the name of the player who is NOT currently active. */
+  get opponent() {
+    return this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
+  }
+
   /**
    * Triggers the virtual coin toss overlay and determines the starting active player.
    * @param {AimingControls} controls AimingControls controller instance
@@ -68,6 +73,8 @@ export class GameEngine {
     this.controls = controls;
     this.renderer = renderer;
     this.renderer.gameRef = this;
+    // Decouple Stand button: renderer fires this callback instead of reaching into gameRef directly
+    this.renderer.onStandRequested = (player) => this.triggerStand(player);
 
     return new Promise((resolve) => {
       this.isTossing = true;
@@ -125,10 +132,13 @@ export class GameEngine {
           overlay.remove();
           this.isTossing = false;
           this.controls.enabled = true;
-          
+
+          // Inject persistent ? rules button into HUD
+          this._injectRulesButton(container);
+
           // Align turn titles in renderer
           this.renderer.setActivePlayer(this.activePlayer);
-          
+
           console.log(`Coin Toss Completed. Active Player is ${this.activePlayer}`);
           resolve(winner);
         }, 500);
@@ -171,13 +181,13 @@ export class GameEngine {
 
     console.log(`Evaluating Shot Outcome. Break: ${this.isBreakShot}, Pocketed: [${this.pocketedBallsThisShot.join(', ')}], Scratch: ${this.cueBallScratchThisShot}`);
 
-    const opponent = this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
+    const opponent = this.opponent;
 
     if (this.isBreakShot) {
       // 1. Break Shot Evaluation
       const cushionContacts = physics.cushionContactSet.size;
       const ballsPocketedCount = this.pocketedBallsThisShot.length;
-      
+
       const isLegalBreak = !this.cueBallScratchThisShot && (cushionContacts >= this.config.rules.minBreakCushionContacts || ballsPocketedCount > 0);
 
       console.log(`Break Cushion Contacts: ${cushionContacts}, Legal: ${isLegalBreak}`);
@@ -195,18 +205,19 @@ export class GameEngine {
               this.renderer.setBallVisibility(originalBall.id, true);
             }
           });
-          // Respawns occurred: maintain breaking player's turn!
+          this.showShotToast(`🎱 Break! ${ballsPocketedCount} ball${ballsPocketedCount > 1 ? 's' : ''} respawned (safe haven) — ${this.activePlayer} keeps turn`, 'miss');
           console.log(`Legal break with pocketed balls. Respawns completed. ${this.activePlayer} keeps turn.`);
         } else {
           // Legal break but no pocketed balls: pass turn cleanly to opponent
           this.activePlayer = opponent;
+          this.showShotToast(`🎱 Break! No balls pocketed — turn passes to ${this.activePlayer}`, 'miss');
           console.log(`Legal break with zero balls pocketed. Turn passes to ${this.activePlayer}.`);
         }
       } else {
         // Illegal Break or Cue Ball Scratch:
         // Teleport any pocketed balls back to respawn spots, increment breaker's miss counter, and transfer turn with Ball-In-Hand in kitchen.
         this.consecutiveMisses[this.activePlayer]++;
-        
+
         // Teleport pocketed balls to respawn spots
         this.pocketedBallsThisShot.forEach((ballId) => {
           const originalBall = (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId);
@@ -218,10 +229,10 @@ export class GameEngine {
 
         // Pass turn to opponent with Ball-In-Hand behind head string (kitchen)
         this.activePlayer = opponent;
-        if (this.controls) {
-          this.controls.hasBallInHand = true;
-        }
-        
+        if (this.controls) this.controls.hasBallInHand = true;
+
+        const breakFaultReason = this.cueBallScratchThisShot ? 'Scratch on break' : 'Illegal break (too few cushion contacts)';
+        this.showShotToast(`🚫 ${breakFaultReason} — Ball-in-Hand for ${this.activePlayer}`, 'scratch');
         console.log(`Illegal break or scratch. Turn passes to ${this.activePlayer} with Ball-in-Hand.`);
       }
 
@@ -240,13 +251,27 @@ export class GameEngine {
 
     if (this.gameEnded) return;
 
-    // Stand countdown decrement — only applies during normal (non-break) shots
+    // Stand countdown decrement — fires once per TURN (not per shot).
+    // A turn ends when the active player changes back to the standing player,
+    // meaning the opponent's uninterrupted run has finished (miss/invalid/scratch).
+    // If the opponent keeps scoring bonus shots, they're still on the same turn and
+    // the countdown doesn't tick down — matching GDD Section 5's "3-turn window."
     if (!this.isBreakShot && this.standingPlayer) {
-      this.standCountdown--;
-      console.log(`Stand countdown: ${this.standCountdown} shots remaining for ${this.activePlayer}.`);
-      if (this.standCountdown <= 0) {
-        this.triggerShowdown();
-        return;
+      // After processNormalPocketedBalls, if activePlayer is now the standing player,
+      // the opponent's turn just ended → decrement the countdown.
+      if (this.activePlayer === this.standingPlayer) {
+        this.standCountdown--;
+        console.log(`Stand countdown: opponent's turn ended. ${this.standCountdown} turn(s) remaining.`);
+        if (this.standCountdown <= 0) {
+          this.triggerShowdown();
+          return;
+        }
+        // Switch active player back to opponent so they can take their next turn
+        const standOpponent = this.standingPlayer === this.player1Name ? this.player2Name : this.player1Name;
+        this.activePlayer = standOpponent;
+      } else {
+        // Opponent kept their turn (bonus shot) — countdown doesn't tick
+        console.log(`Stand countdown: ${this.standCountdown} turn(s) remaining (opponent still shooting).`);
       }
     }
 
@@ -258,202 +283,272 @@ export class GameEngine {
 
   /**
    * Processes normal target ball scoring, suit mapping, phase transitions, and wildcard drops.
+   * Scratch rule: if the cue ball was pocketed on this shot the entire shot is voided —
+   * all co-pocketed target balls respawn with no cards awarded, no suit mappings made.
    * @param {PhysicsEngine} physics The active PhysicsEngine instance
    */
   async processNormalPocketedBalls(physics) {
     if (this.gameEnded) return;
 
     const opponent = this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
-    
-    let anyValidScore = false;
-    let anyInvalidDrop = false;
 
-    // Process all pocketed target balls
+    // ── SCRATCH FIRST-CHECK ──────────────────────────────────────────────────
+    // A scratch (cue ball pocketed) voids the entire shot regardless of what
+    // else was pocketed. Respawn every co-pocketed ball, award nothing, end turn.
+    if (this.cueBallScratchThisShot) {
+      this.pocketedBallsDetails.forEach(({ ballId }) => {
+        const ball = (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId);
+        if (ball) {
+          physics.respawnBall(ball);
+          if (this.renderer) this.renderer.setBallVisibility(ball.id, true);
+        }
+      });
+
+      this.consecutiveMisses[this.activePlayer]++;
+      const isOpponentStanding = this.handsStood[opponent];
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      if (this.controls) this.controls.hasBallInHand = true;
+
+      if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+
+      const scratchCount = this.pocketedBallsDetails.length;
+      const respawnNote = scratchCount > 0 ? ` — ${scratchCount} ball${scratchCount > 1 ? 's' : ''} respawned` : '';
+      this.showShotToast(`🎱 Scratch! Ball-in-Hand for opponent${respawnNote}`, 'scratch');
+      console.log(`Scratch! All co-pocketed balls respawned. Turn → ${this.activePlayer} with Ball-in-Hand.`);
+
+      const p1Misses = this.consecutiveMisses[this.player1Name] || 0;
+      const p2Misses = this.consecutiveMisses[this.player2Name] || 0;
+      if (p1Misses >= this.config.rules.maxConsecutiveMisses) {
+        this.showGameOver(this.player2Name, `${this.player1Name} hit ${this.config.rules.maxConsecutiveMisses} consecutive misses (including scratch) and is disqualified!`);
+      } else if (p2Misses >= this.config.rules.maxConsecutiveMisses) {
+        this.showGameOver(this.player1Name, `${this.player2Name} hit ${this.config.rules.maxConsecutiveMisses} consecutive misses (including scratch) and is disqualified!`);
+      }
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    let anyValidScore = false;
+    const invalidReasons = [];
+
     for (const detail of this.pocketedBallsDetails) {
-      const { ballId, ball, pocketId } = detail;
-      
+      const { ballId } = detail;
       const originalBall = (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId);
       if (!originalBall) continue;
 
-      const suit = this.pocketSuits[pocketId];
+      const result = (ballId >= 1 && ballId <= 13)
+        ? await this._processRankBall(detail, originalBall, physics, opponent)
+        : await this._processWildcardBall(detail, originalBall, physics, opponent);
 
-      if (ballId >= 1 && ballId <= 13) {
-        // Standard Rank Ball
-        if (suit === null) {
-          // Unmapped pocket
-          if (this.phase === 1) {
-            const selectedSuit = await this.promptSuitMapping(this.activePlayer, pocketId, ballId);
-            this.pocketSuits[pocketId] = selectedSuit;
-
-            // Register card if not already held
-            const hand = this.hands[this.activePlayer] || [];
-            const hasCard = hand.some(c => c.rank === ballId && c.suit === selectedSuit);
-            if (!hasCard) {
-              if (hand.length < 5) {
-                hand.push({ rank: ballId, suit: selectedSuit });
-                anyValidScore = true;
-                if (!this.firstToCompleteHand && hand.length === 5) {
-                  this.firstToCompleteHand = this.activePlayer;
-                }
-              } else {
-                hand.push({ rank: ballId, suit: selectedSuit });
-                await this.promptCardSwap(this.activePlayer);
-                anyValidScore = true;
-              }
-            }
-
-            if (this.renderer) {
-              this.renderer.updatePocketGraphics(this.pocketSuits);
-              this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
-            }
-
-            // Phase transition trigger: 4 distinct suits mapped
-            const mappedCount = this.pocketSuits.filter(s => s !== null && s !== 'W').length;
-            if (mappedCount === 4) {
-              this.phase = 2;
-              this.pocketSuits.forEach((s, idx) => {
-                if (s === null) this.pocketSuits[idx] = 'W'; // Convert unmapped to Wild Pockets
-              });
-              if (this.renderer) {
-                this.renderer.updatePocketGraphics(this.pocketSuits);
-              }
-            }
-
-            physics.respawnBall(originalBall);
-            if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
-          } else {
-            physics.respawnBall(originalBall);
-            if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
-            anyInvalidDrop = true;
-          }
-        } else if (suit === 'W') {
-          // Standard ball entering wild pocket is INVALID
-          physics.respawnBall(originalBall);
-          if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
-          anyInvalidDrop = true;
-        } else {
-          // Mapped suit pocket
-          const hand = this.hands[this.activePlayer] || [];
-          const hasCard = hand.some(c => c.rank === ballId && c.suit === suit);
-          
-          if (!hasCard) {
-            if (hand.length < 5) {
-              hand.push({ rank: ballId, suit });
-              anyValidScore = true;
-              if (!this.firstToCompleteHand && hand.length === 5) {
-                this.firstToCompleteHand = this.activePlayer;
-              }
-            } else {
-              hand.push({ rank: ballId, suit });
-              await this.promptCardSwap(this.activePlayer);
-              anyValidScore = true;
-            }
-            if (this.renderer) {
-              this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
-            }
-          } else {
-            // Duplicate card is INVALID
-            anyInvalidDrop = true;
-          }
-
-          physics.respawnBall(originalBall);
-          if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
-        }
-      } else if (ballId === 14 || ballId === 15) {
-        // Wildcard Ball
-        if (suit === 'W') {
-          // Wildcard in wild pocket is VALID
-          const chosenCard = await this.promptWildcardSelection(this.activePlayer);
-          
-          const hand = this.hands[this.activePlayer] || [];
-          const hasCard = hand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit);
-          
-          if (!hasCard) {
-            if (hand.length < 5) {
-              hand.push(chosenCard);
-              anyValidScore = true;
-              if (!this.firstToCompleteHand && hand.length === 5) {
-                this.firstToCompleteHand = this.activePlayer;
-              }
-            } else {
-              hand.push(chosenCard);
-              await this.promptCardSwap(this.activePlayer);
-              anyValidScore = true;
-            }
-            if (this.renderer) {
-              this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
-            }
-          } else {
-            // Duplicate wildcard is INVALID
-            anyInvalidDrop = true;
-          }
-
-          // Wildcard is permanently removed from play: no respawn, hide view!
-          if (this.renderer) {
-            this.renderer.setBallVisibility(originalBall.id, false);
-          }
-          Matter.Composite.remove(physics.world, originalBall);
-          physics.targetBalls = physics.targetBalls.filter(b => b.id !== originalBall.id);
-        } else {
-          // Wildcard in suit pocket is INVALID
-          physics.respawnBall(originalBall);
-          if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
-          anyInvalidDrop = true;
-        }
-      }
+      if (result.valid) anyValidScore = true;
+      if (result.invalidReason) invalidReasons.push(result.invalidReason);
     }
 
-    const isOpponentStanding = this.handsStood[opponent];
+    // ── Turn resolution ───────────────────────────────────────────────
+    const scorer = this.activePlayer; // capture before _resolveTurn may switch it
+    this._resolveTurn(anyValidScore, invalidReasons, opponent);
 
-    // Evaluate turn shifts and misses
-    if (this.cueBallScratchThisShot) {
-      this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) {
-        this.activePlayer = opponent;
-      }
-      if (this.controls) {
-        this.controls.hasBallInHand = true;
-      }
-      console.log(`Scratch! Turn transitions to ${this.activePlayer}`);
-    } else if (anyInvalidDrop) {
-      this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) {
-        this.activePlayer = opponent;
-      }
-      console.log(`Invalid Drop occurred! Turn transitions to ${this.activePlayer}`);
-    } else if (anyValidScore) {
-      this.consecutiveMisses[this.activePlayer] = 0;
-      console.log(`${this.activePlayer} scored a card and keeps their turn.`);
-    } else {
-      // Miss
-      this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) {
-        this.activePlayer = opponent;
-      }
-      console.log(`Miss. Turn transitions to ${this.activePlayer}`);
-    }
+    if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
 
-    // Update HUD counters
-    if (this.renderer) {
-      this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
-    }
-
-    // Forced Showdown check: both players have exactly 5 cards
+    // Forced Showdown: both players have exactly 5 cards
     const p1Hand = this.hands[this.player1Name] || [];
     const p2Hand = this.hands[this.player2Name] || [];
-    if (p1Hand.length === 5 && p2Hand.length === 5) {
-      this.triggerShowdown();
+    if (p1Hand.length === 5 && p2Hand.length === 5) { this.triggerShowdown(); return; }
+
+    // 3-Miss Elimination (scratch path handled above)
+    const maxMisses = this.config.rules.maxConsecutiveMisses;
+    const p1Misses = this.consecutiveMisses[this.player1Name] || 0;
+    const p2Misses = this.consecutiveMisses[this.player2Name] || 0;
+    if (p1Misses >= maxMisses) {
+      this.showGameOver(this.player2Name, `${this.player1Name} hit ${maxMisses} consecutive misses and is disqualified!`);
+      return;
+    } else if (p2Misses >= maxMisses) {
+      this.showGameOver(this.player1Name, `${this.player2Name} hit ${maxMisses} consecutive misses and is disqualified!`);
       return;
     }
 
-    // 3-Miss Elimination Rule
-    const p1Misses = this.consecutiveMisses[this.player1Name] || 0;
-    const p2Misses = this.consecutiveMisses[this.player2Name] || 0;
+    // Stand Decision Modal: show whenever the scoring player just has exactly 5 cards
+    const scorerHand = this.hands[scorer] || [];
+    if (anyValidScore && scorerHand.length === 5 && !this.handsStood[scorer] && !this.gameEnded) {
+      await this.showStandDecisionModal(scorer);
+      // After the modal, re-sync HUD (triggerStand may have changed activePlayer)
+      if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+    }
+  }
 
-    if (p1Misses >= 3) {
-      this.showGameOver(this.player2Name, `${this.player1Name} hit 3 consecutive misses and is disqualified!`);
-    } else if (p2Misses >= 3) {
-      this.showGameOver(this.player1Name, `${this.player2Name} hit 3 consecutive misses and is disqualified!`);
+  /**
+   * Handles scoring logic for a standard rank ball (1–13) pocketing event.
+   * @returns {{ valid: boolean, invalidReason: string|null }}
+   */
+  async _processRankBall({ ballId, pocketId }, originalBall, physics, opponent) {
+    const suit = this.pocketSuits[pocketId];
+
+    if (suit === null) {
+      // ── Unmapped pocket ───────────────────────────────────────────
+      if (this.phase === 1) {
+        const selectedSuit = await this.promptSuitMapping(this.activePlayer, pocketId, ballId);
+        this.pocketSuits[pocketId] = selectedSuit;
+
+        const hand = this.hands[this.activePlayer] || [];
+        const oppHand = this.hands[opponent] || [];
+        const alreadyHeld = hand.some(c => c.rank === ballId && c.suit === selectedSuit)
+                         || oppHand.some(c => c.rank === ballId && c.suit === selectedSuit);
+
+        let scored = false;
+        if (!alreadyHeld) scored = await this._addCardToHand(this.activePlayer, { rank: ballId, suit: selectedSuit });
+
+        if (this.renderer) {
+          this.renderer.updatePocketGraphics(this.pocketSuits);
+          this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+        }
+
+        // Phase transition: 4 suits mapped → remaining unmapped become Wild
+        const mappedCount = this.pocketSuits.filter(s => s !== null && s !== 'W').length;
+        if (mappedCount === 4) {
+          this.phase = 2;
+          this.pocketSuits.forEach((s, idx) => { if (s === null) this.pocketSuits[idx] = 'W'; });
+          if (this.renderer) this.renderer.updatePocketGraphics(this.pocketSuits);
+        }
+
+        physics.respawnBall(originalBall);
+        if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
+        return { valid: scored, invalidReason: (!scored && alreadyHeld) ? 'duplicate' : null };
+      }
+
+      // Phase 2 — unmapped pocket (shouldn't exist but guard anyway)
+      physics.respawnBall(originalBall);
+      if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
+      return { valid: false, invalidReason: 'rank_in_wild' };
+
+    } else if (suit === 'W') {
+      // ── Wild pocket — rank balls forbidden ────────────────────────
+      physics.respawnBall(originalBall);
+      if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
+      return { valid: false, invalidReason: 'rank_in_wild' };
+
+    } else {
+      // ── Mapped suit pocket ────────────────────────────────────────
+      const hand = this.hands[this.activePlayer] || [];
+      const oppHand = this.hands[opponent] || [];
+      const alreadyHeld = hand.some(c => c.rank === ballId && c.suit === suit)
+                       || oppHand.some(c => c.rank === ballId && c.suit === suit);
+
+      let scored = false;
+      if (!alreadyHeld) {
+        scored = await this._addCardToHand(this.activePlayer, { rank: ballId, suit });
+        if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+      }
+
+      physics.respawnBall(originalBall);
+      if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
+      return { valid: scored, invalidReason: alreadyHeld ? 'duplicate' : null };
+    }
+  }
+
+  /**
+   * Handles scoring logic for a wildcard ball (14–15) pocketing event.
+   * @returns {{ valid: boolean, invalidReason: string|null }}
+   */
+  async _processWildcardBall({ ballId, pocketId }, originalBall, physics, opponent) {
+    const suit = this.pocketSuits[pocketId];
+
+    if (suit === 'W') {
+      // ── Wild pocket — wildcard is valid ──────────────────────────
+      const chosenCard = await this.promptWildcardSelection(this.activePlayer);
+
+      const hand = this.hands[this.activePlayer] || [];
+      const oppHand = this.hands[opponent] || [];
+      const alreadyHeld = hand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit)
+                       || oppHand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit);
+
+      let scored = false;
+      if (!alreadyHeld) {
+        scored = await this._addCardToHand(this.activePlayer, chosenCard);
+        if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+      }
+
+      // Wildcard is permanently removed — never respawns
+      if (this.renderer) this.renderer.setBallVisibility(originalBall.id, false);
+      Matter.Composite.remove(physics.world, originalBall);
+      physics.targetBalls = physics.targetBalls.filter(b => b.id !== originalBall.id);
+
+      return { valid: scored, invalidReason: alreadyHeld ? 'duplicate' : null };
+
+    } else {
+      // ── Suit or unmapped pocket — wildcard forbidden ──────────────
+      physics.respawnBall(originalBall);
+      if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
+      return { valid: false, invalidReason: 'wildcard_wrong_pocket' };
+    }
+  }
+
+  /**
+   * Adds a card to a player's hand, triggering a card-swap prompt if the hand exceeds 5.
+   * Tracks the first player to complete their hand.
+   * @returns {boolean} true — card was added (caller should treat this as a valid score)
+   */
+  async _addCardToHand(player, card) {
+    const hand = this.hands[player] || [];
+    hand.push(card);
+    if (!this.firstToCompleteHand && hand.length === 5) this.firstToCompleteHand = player;
+    if (hand.length > 5) await this.promptCardSwap(player);
+    return true;
+  }
+
+  /**
+   * Resolves the turn outcome: updates active player, miss counter, and fires the shot toast.
+   * Turn shift rules (GDD Section 4):
+   *  • Valid score only  → keep turn, reset miss counter.
+   *  • Valid + invalid   → reset miss counter, end turn (invalid drop ends it).
+   *  • Invalid only      → increment miss counter, end turn.
+   *  • Complete miss     → increment miss counter, end turn.
+   * @param {boolean}  anyValidScore
+   * @param {string[]} invalidReasons  Array of reason codes from this shot's invalid events
+   * @param {string}   opponent        The non-active player's name (captured before any switch)
+   */
+  _resolveTurn(anyValidScore, invalidReasons, opponent) {
+    const anyInvalidDrop = invalidReasons.length > 0;
+    const isOpponentStanding = this.handsStood[opponent];
+    const primaryReason = invalidReasons[0] || null;
+
+    if (anyValidScore && !anyInvalidDrop) {
+      this.consecutiveMisses[this.activePlayer] = 0;
+      const handSize = (this.hands[this.activePlayer] || []).length;
+      this.showShotToast(`✅ Scored! ${this.activePlayer} earns a card (${handSize}/5) — bonus turn`, 'score');
+      console.log(`${this.activePlayer} scored and keeps their turn.`);
+
+    } else if (anyValidScore && anyInvalidDrop) {
+      this.consecutiveMisses[this.activePlayer] = 0;
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      this.showShotToast(`⚠️ Mixed shot — card scored, but: ${this._invalidReasonText(primaryReason)}`, 'mixed');
+      console.log(`Mixed shot (valid + invalid). Miss counter reset, turn ends.`);
+
+    } else if (anyInvalidDrop) {
+      const prevPlayer = this.activePlayer;
+      this.consecutiveMisses[this.activePlayer]++;
+      const missCount = this.consecutiveMisses[prevPlayer];
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      this.showShotToast(`🚫 ${this._invalidReasonText(primaryReason)} (miss #${missCount})`, 'invalid');
+      console.log(`Invalid drop — turn transitions to ${this.activePlayer}`);
+
+    } else {
+      this.consecutiveMisses[this.activePlayer]++;
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      this.showShotToast(`💨 Miss — no balls pocketed. Turn → ${this.activePlayer}`, 'miss');
+      console.log(`Miss. Turn transitions to ${this.activePlayer}`);
+    }
+  }
+
+  /**
+   * Returns a human-readable explanation for a given invalid-drop reason code.
+   * @param {string|null} reason
+   * @returns {string}
+   */
+  _invalidReasonText(reason) {
+    switch (reason) {
+      case 'duplicate':            return 'Card already held by either player';
+      case 'wildcard_wrong_pocket': return '★ Wildcard must be played into a Wild ★ Pocket';
+      case 'rank_in_wild':         return 'Numbered ball cannot score in a Wild ★ Pocket';
+      default:                     return 'Invalid drop';
     }
   }
 
@@ -556,13 +651,14 @@ export class GameEngine {
       this.controls.enabled = false;
       const container = document.getElementById('game-container') || document.body;
 
-      // Merge hands of both players to determine occupied cards in play (strict duplicate prevention)
-      const occupiedCards = [
-        ...(this.hands[this.player1Name] || []),
-        ...(this.hands[this.player2Name] || [])
-      ];
-
-      const isOccupied = (r, s) => occupiedCards.some(c => c.rank === r && c.suit === s);
+      // No card may be duplicated across either player's hand.
+      // A wildcard choice is blocked if that exact rank+suit is already held by anyone.
+      const playerHand = this.hands[player] || [];
+      const opponentName = player === this.player1Name ? this.player2Name : this.player1Name;
+      const opponentHandWild = this.hands[opponentName] || [];
+      const isOccupied = (r, s) =>
+        playerHand.some(c => c.rank === r && c.suit === s) ||
+        opponentHandWild.some(c => c.rank === r && c.suit === s);
       const suits = ['S', 'H', 'D', 'C'];
       const allSuitsOccupied = (r) => suits.every(s => isOccupied(r, s));
 
@@ -817,8 +913,208 @@ export class GameEngine {
   }
 
   /**
+   * Creates and appends the persistent ? rules button to the HUD.
+   * Safe to call multiple times — skips if already present.
+   * @param {HTMLElement} container The game container DOM element
+   */
+  _injectRulesButton(container) {
+    if (document.getElementById('rules-help-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'rules-help-btn';
+    btn.className = 'hud-rules-btn';
+    btn.title = 'Rules Reference';
+    btn.textContent = '?';
+    btn.addEventListener('click', () => this.showRulesModal());
+    container.appendChild(btn);
+  }
+
+  /**
+   * Opens the full scrollable rules reference modal.
+   * Covers all game rules: table layout, pockets/suits, card scoring,
+   * poker hand rankings, stand mechanic, and DQ rules.
+   */
+  showRulesModal() {
+    const container = document.getElementById('game-container') || document.body;
+    if (document.querySelector('.rules-modal-overlay')) return; // Already open
+
+    const overlay = document.createElement('div');
+    overlay.className = 'rules-modal-overlay';
+    overlay.innerHTML = `
+      <div class="rules-modal-card">
+        <h2 class="rules-modal-title">📖 How to Play</h2>
+
+        <div class="rules-section-header">The Goal</div>
+        <div class="rules-row">
+          <span class="rules-badge">🏆</span>
+          <span class="rules-text">Build the best <strong>5-card poker hand</strong> by pocketing pool balls. Each pocket is linked to a suit (♠ ♥ ♦ ♣). Pocket a ball → earn a card. Best hand at showdown wins.</span>
+        </div>
+
+        <div class="rules-section-header">Table & Pockets</div>
+        <div class="rules-row">
+          <span class="rules-badge">6</span>
+          <span class="rules-text">There are <strong>6 pockets</strong> — 4 corners + 2 side pockets. The first 4 balls pocketed into 4 different pockets each claim a <strong>suit</strong> for that pocket.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">★</span>
+          <span class="rules-text">Once 4 suits are claimed, the remaining 2 pockets become <strong>Wild</strong>. Pocketing into a Wild lets you choose any rank and suit — but not a card already held by either player.</span>
+        </div>
+
+        <div class="rules-section-header">Earning Cards</div>
+        <div class="rules-row">
+          <span class="rules-badge">✅</span>
+          <span class="rules-text"><strong>Valid shot:</strong> Pocket any numbered ball (1–15) into a claimed or Wild pocket → earn one card. Your miss counter resets.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">🔁</span>
+          <span class="rules-text"><strong>Keeping turn:</strong> Score a valid card and your turn continues — keep shooting until you miss.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">⚠️</span>
+          <span class="rules-text"><strong>Invalid drop:</strong> No card may exist in both players' hands simultaneously. If the ball you pocket would create a duplicate (same rank+suit already held by either player), it respawns, your turn ends, and it counts as a miss.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">5</span>
+          <span class="rules-text"><strong>Hand limit:</strong> Maximum 5 cards. On earning a 6th you must discard one — choose wisely.</span>
+        </div>
+
+        <div class="rules-section-header">Break Shot</div>
+        <div class="rules-row">
+          <span class="rules-badge">🎱</span>
+          <span class="rules-text">The opening break is <strong>safe haven</strong> — any balls pocketed on the break respawn. No cards are awarded and no suits are claimed. You need ${this.config.rules.minBreakCushionContacts ?? 4} cushion contacts minimum if no ball is pocketed, or the break is a foul.</span>
+        </div>
+
+        <div class="rules-section-header">Ball-in-Hand</div>
+        <div class="rules-row">
+          <span class="rules-badge">👋</span>
+          <span class="rules-text">After a scratch (cue ball pocketed), your opponent gets <strong>Ball-in-Hand</strong> — they can place the cue ball anywhere on the table (not overlapping another ball). Hit <em>Confirm Position</em> to lock it in.</span>
+        </div>
+
+        <div class="rules-section-header">Standing</div>
+        <div class="rules-row">
+          <span class="rules-badge">🛑</span>
+          <span class="rules-text">When you have a <strong>full 5-card hand</strong> you may <em>Stand</em>. Your opponent then gets <strong>${this.config.rules.standCountdownTurns ?? 3} more turns</strong> to finish their hand. Showdown happens at turn 0 or when both players have stood.</span>
+        </div>
+
+        <div class="rules-section-header">Disqualification</div>
+        <div class="rules-row">
+          <span class="rules-badge">❌</span>
+          <span class="rules-text"><strong>${this.config.rules.maxConsecutiveMisses ?? 3} consecutive misses</strong> = DQ. Your opponent wins automatically. Scoring a valid card resets your miss counter.</span>
+        </div>
+
+        <div class="rules-section-header">Poker Hand Rankings</div>
+        <div class="rules-hand-grid">
+          <div class="rules-hand-item"><span class="rules-hand-rank">10</span><span class="rules-hand-label">Royal Flush</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">9</span><span class="rules-hand-label">Straight Flush</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">8</span><span class="rules-hand-label">Four of a Kind</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">7</span><span class="rules-hand-label">Full House</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">6</span><span class="rules-hand-label">Flush</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">5</span><span class="rules-hand-label">Straight</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">4</span><span class="rules-hand-label">Three of a Kind</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">3</span><span class="rules-hand-label">Two Pair</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">2</span><span class="rules-hand-label">One Pair</span></div>
+          <div class="rules-hand-item"><span class="rules-hand-rank">1</span><span class="rules-hand-label">High Card</span></div>
+        </div>
+        <div class="rules-row" style="margin-top:8px;">
+          <span class="rules-badge">A</span>
+          <span class="rules-text">Ace plays <strong>high or low</strong>. A-2-3-4-5 (the "wheel") is the lowest straight.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">≡</span>
+          <span class="rules-text">Tied hands are broken by <strong>kickers</strong>, then by who stood first, then by who completed their hand first.</span>
+        </div>
+
+        <button class="rules-close-btn" id="rules-close-btn">GOT IT — CLOSE</button>
+      </div>
+    `;
+
+    container.appendChild(overlay);
+
+    // Close on button click or backdrop click
+    document.getElementById('rules-close-btn').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+  }
+
+  /**
+   * Shows the Stand Decision Modal when a player has collected their 5th card.
+   * The modal offers two choices:
+   *   • "Keep my hand (STAND)" — calls triggerStand; opponent gets standCountdownTurns shots.
+   *   • "Continue shooting"    — dismisses; player keeps their turn and may improve the hand.
+   *
+   * The modal re-appears after every subsequent valid score + swap while the player holds 5 cards.
+   * @param {string} player The player who just reached or maintained 5 cards
+   * @returns {Promise<void>} Resolves when the player clicks either button
+   */
+  showStandDecisionModal(player) {
+    return new Promise((resolve) => {
+      if (this.gameEnded || this.handsStood[player]) { resolve(); return; }
+      if (this.controls) this.controls.enabled = false;
+
+      const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
+      const rankLabels  = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+      const hand = this.hands[player] || [];
+      const handStr = hand.map(c => {
+        const r = rankLabels[c.rank] || String(c.rank);
+        const s = suitSymbols[c.suit] || c.suit;
+        return `${r}${s}`;
+      }).join('  ');
+
+      const countdownTurns = this.config.rules.standCountdownTurns;
+      const isP1 = player === this.player1Name;
+      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
+      const container = document.getElementById('game-container') || document.body;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'stand-decision-overlay';
+      overlay.innerHTML = `
+        <div class="stand-decision-card">
+          <div class="stand-decision-badge" style="color:${accentColor};">★ DECISION TIME ★</div>
+          <div class="stand-decision-player" style="color:${accentColor};">${player}</div>
+          <div class="stand-decision-hand-title">Your current hand:</div>
+          <div class="stand-decision-hand-str">${handStr}</div>
+          <div class="stand-decision-divider"></div>
+          <div class="stand-decision-options">
+            <div class="stand-decision-option keep-option">
+              <div class="stand-option-icon">🛑</div>
+              <div class="stand-option-title">KEEP my hand</div>
+              <div class="stand-option-desc">Lock in your 5 cards now.<br>Your opponent gets <strong>${countdownTurns} more turns</strong> to improve their hand, then it's Showdown.</div>
+              <button class="stand-btn-keep" id="stand-modal-keep">Keep &amp; Stand</button>
+            </div>
+            <div class="stand-decision-sep">or</div>
+            <div class="stand-decision-option continue-option">
+              <div class="stand-option-icon">🎱</div>
+              <div class="stand-option-title">CONTINUE shooting</div>
+              <div class="stand-option-desc">Keep playing. You can swap out a card for a better one — but so can your opponent.</div>
+              <button class="stand-btn-continue" id="stand-modal-continue">Continue shooting</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      container.appendChild(overlay);
+
+      const doKeep = () => {
+        overlay.remove();
+        if (this.controls) this.controls.enabled = true;
+        this.triggerStand(player);
+        resolve();
+      };
+
+      const doContinue = () => {
+        overlay.remove();
+        if (this.controls) this.controls.enabled = true;
+        resolve();
+      };
+
+      overlay.querySelector('#stand-modal-keep').addEventListener('click', (e) => { e.stopPropagation(); doKeep(); });
+      overlay.querySelector('#stand-modal-continue').addEventListener('click', (e) => { e.stopPropagation(); doContinue(); });
+    });
+  }
+
+  /**
    * Puts player into voluntary stand state.
-   * Locks player controls, resets lasers, and starts a 3-shot countdown for opponent.
+   * Locks player controls, resets lasers, and starts a countdown for opponent.
    * @param {string} player The standing player's name
    */
   triggerStand(player) {
@@ -857,7 +1153,7 @@ export class GameEngine {
       this.renderer.setActivePlayer(this.activePlayer);
     }
 
-    console.log(`Stand countdown started. ${opponent} has 3 shots to optimize their hand.`);
+    console.log(`Stand countdown started. ${opponent} has ${this.config.rules.standCountdownTurns} shots to optimize their hand.`);
   }
 
   /**
@@ -875,7 +1171,7 @@ export class GameEngine {
     const handA = this.hands[this.player1Name] || [];
     const handB = this.hands[this.player2Name] || [];
 
-    const result = compareHands(handA, handB, this.standingPlayer, this.firstToStand, this.firstToCompleteHand);
+    const result = compareHands(handA, handB, this.standingPlayer, this.firstToStand, this.firstToCompleteHand, this.player1Name, this.player2Name);
     
     const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
     const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
@@ -904,8 +1200,11 @@ export class GameEngine {
 
   /**
    * Opens static HTML overlay for final Match Over.
+   * Always sets gameEnded = true first to prevent any subsequent shot evaluations
+   * from re-triggering overlays (e.g. 3-miss DQ path bypasses triggerShowdown).
    */
   showGameOver(winner, reason) {
+    this.gameEnded = true;
     this.controls.enabled = false;
     const container = document.getElementById('game-container') || document.body;
     
@@ -933,5 +1232,39 @@ export class GameEngine {
     `;
     
     container.appendChild(overlay);
+  }
+
+  /**
+   * Displays a brief toast notification just below the HUD describing what
+   * happened on the previous shot. Replaces any already-visible toast.
+   * Automatically dismisses after `duration` ms.
+   *
+   * @param {string} message   Human-readable shot summary
+   * @param {'score'|'scratch'|'miss'|'invalid'|'mixed'} type  Visual variant
+   * @param {number} [duration=3000]  Auto-dismiss delay in milliseconds
+   */
+  showShotToast(message, type = 'miss', duration = 3000) {
+    const container = document.getElementById('game-container') || document.body;
+
+    // Remove any previous toast immediately, clearing its pending exit timer first
+    const existing = container.querySelector('.shot-toast');
+    if (existing) {
+      clearTimeout(existing._exitTimer);
+      existing.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `shot-toast type-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    // Schedule exit animation then removal
+    const exitTimer = setTimeout(() => {
+      toast.classList.add('toast-exit');
+      toast.addEventListener('animationend', () => toast.remove(), { once: true });
+    }, duration);
+
+    // Clean up timer if toast is removed early (e.g. next toast replaces it)
+    toast._exitTimer = exitTimer;
   }
 }

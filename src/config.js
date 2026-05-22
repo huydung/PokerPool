@@ -128,6 +128,8 @@ export const CONFIG = {
       headString: 0x64b5f6,
       /** @type {number} Pure white cue ball fill */
       cueBall: 0xffffff,
+      /** @type {number} Default border color for unmapped pockets (generic gray) */
+      pocketBorder: 0x424242,
       
       // Target Balls Colors (Kenney Board Game Palette)
       balls: [
@@ -185,7 +187,7 @@ export const CONFIG = {
     /** @type {number} Maximum consecutive misses allowed before DQ (Milestone 4 DQ) */
     maxConsecutiveMisses: 3,
     /** @type {number} Turns/shots allowed to opponent after a player voluntary stands */
-    standCountdownTurns: 3,
+    standCountdownTurns: 2,
     /** @type {number} Minimum cushion contacts required for a legal break if no ball is pocketed */
     minBreakCushionContacts: 4,
     /** @type {Array<{x: number, y: number}>} 9-point respawn matrix coordinates */
