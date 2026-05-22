@@ -125,10 +125,13 @@ export class GameEngine {
           overlay.remove();
           this.isTossing = false;
           this.controls.enabled = true;
-          
+
+          // Inject persistent ? rules button into HUD
+          this._injectRulesButton(container);
+
           // Align turn titles in renderer
           this.renderer.setActivePlayer(this.activePlayer);
-          
+
           console.log(`Coin Toss Completed. Active Player is ${this.activePlayer}`);
           resolve(winner);
         }, 500);
@@ -839,79 +842,61 @@ export class GameEngine {
   }
 
   /**
-   * Puts player into voluntary stand state.
-   * Locks player controls, resets lasers, and starts a 3-shot countdown for opponent.
-   * @param {string} player The standing player's name
+   * Creates and appends the persistent ? rules button to the HUD.
+   * Safe to call multiple times — skips if already present.
+   * @param {HTMLElement} container The game container DOM element
    */
-  triggerStand(player) {
-    if (this.gameEnded) return;
-    const hand = this.hands[player];
-    if (!hand || hand.length !== 5) {
-      console.warn(`Cannot stand. ${player} does not have exactly 5 cards.`);
-      return;
-    }
-
-    console.log(`${player} decided to voluntary stand!`);
-    this.handsStood[player] = true;
-    this.standingPlayer = player;
-    
-    if (!this.firstToStand) {
-      this.firstToStand = player;
-    }
-
-    const opponent = player === this.player1Name ? this.player2Name : this.player1Name;
-
-    // Double stand check: if opponent has already stood or stands now, trigger showdown immediately!
-    if (this.handsStood[opponent]) {
-      this.triggerShowdown();
-      return;
-    }
-
-    // Set countdown to 3 shots for opponent
-    this.standCountdown = this.config.rules.standCountdownTurns;
-
-    // Set turn to opponent immediately
-    this.activePlayer = opponent;
-
-    // Lock aiming lasers or disable controls for standing player (they don't shoot anymore)
-    if (this.renderer) {
-      this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
-      this.renderer.setActivePlayer(this.activePlayer);
-    }
-
-    console.log(`Stand countdown started. ${opponent} has 3 shots to optimize their hand.`);
+  _injectRulesButton(container) {
+    if (document.getElementById('rules-help-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'rules-help-btn';
+    btn.className = 'hud-rules-btn';
+    btn.title = 'Rules Reference';
+    btn.textContent = '?';
+    btn.addEventListener('click', () => this.showRulesModal());
+    container.appendChild(btn);
   }
 
   /**
-   * Collects both card hands, runs the standard 5-card poker evaluator,
-   * compares hands with kicker tiebreaker, and displays the game over screen.
+   * Opens the full scrollable rules reference modal.
+   * Covers all game rules: table layout, pockets/suits, card scoring,
+   * poker hand rankings, stand mechanic, and DQ rules.
    */
-  triggerShowdown() {
-    if (this.gameEnded) return;
-    this.gameEnded = true;
+  showRulesModal() {
+    const container = document.getElementById('game-container') || document.body;
+    if (document.querySelector('.rules-modal-overlay')) return; // Already open
 
-    if (this.controls) {
-      this.controls.enabled = false;
-    }
+    const overlay = document.createElement('div');
+    overlay.className = 'rules-modal-overlay';
+    overlay.innerHTML = `
+      <div class="rules-modal-card">
+        <h2 class="rules-modal-title">📖 How to Play</h2>
 
-    const handA = this.hands[this.player1Name] || [];
-    const handB = this.hands[this.player2Name] || [];
+        <div class="rules-section-header">The Goal</div>
+        <div class="rules-row">
+          <span class="rules-badge">🏆</span>
+          <span class="rules-text">Build the best <strong>5-card poker hand</strong> by pocketing pool balls. Each pocket is linked to a suit (♠ ♥ ♦ ♣). Pocket a ball → earn a card. Best hand at showdown wins.</span>
+        </div>
 
-    const result = compareHands(handA, handB, this.standingPlayer, this.firstToStand, this.firstToCompleteHand, this.player1Name, this.player2Name);
-    
-    const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
-    const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+        <div class="rules-section-header">Table & Pockets</div>
+        <div class="rules-row">
+          <span class="rules-badge">6</span>
+          <span class="rules-text">There are <strong>6 pockets</strong> — 4 corners + 2 side pockets. The first 4 balls pocketed into 4 different pockets each claim a <strong>suit</strong> for that pocket.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">★</span>
+          <span class="rules-text">Once 4 suits are claimed, the remaining 2 pockets become <strong>Wild</strong>. Pocketing into a Wild lets you choose any rank and suit (no duplicates in your own hand).</span>
+        </div>
 
-    const getHandStr = (hand) => {
-      if (hand.length === 0) return "Empty Hand";
-      return hand.map(c => {
-        const symbol = suitSymbols[c.suit] || c.suit;
-        const rankLabel = rankSymbols[c.rank] || c.rank.toString();
-        return `${rankLabel}${symbol}`;
-      }).join(', ');
-    };
-
-    const details = `
-      <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.15); padding-top: 15px; text-align: left; font-family: monospace; font-size: 12px; color: #a0aab8;">
-        <div style="margin-bottom: 8px;"><strong style="color: #00e5ff;">Alice's Hand:</strong> ${getHandStr(handA)}<br><span style="color: #64b5f6;">(${result.labelA})</span></div>
-        <div style="margin-bottom: 8px;"><strong style="color: #e040fb;">Bob's Hand:</strong> ${getHandStr(handB)}<br><span style="color: #ba68c8;">(
+        <div class="rules-section-header">Earning Cards</div>
+        <div class="rules-row">
+          <span class="rules-badge">✅</span>
+          <span class="rules-text"><strong>Valid shot:</strong> Pocket any numbered ball (1–15) into a claimed or Wild pocket → earn one card. Your miss counter resets.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">🔁</span>
+          <span class="rules-text"><strong>Bonus turn:</strong> Score a valid card and your turn continues — keep shooting until you miss.</span>
+        </div>
+        <div class="rules-row">
+          <span class="rules-badge">⚠️</span>
+          <span class="rule

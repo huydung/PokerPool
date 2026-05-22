@@ -27,6 +27,7 @@ export class AimingControls {
     this.activePointerId = undefined; // Track the active pointer for multi-touch safety
     this._hasBallInHand = false;
     this.isPlacingCueBall = false;
+    this.cueBallPositionValid = true; // Tracks whether current BIH drop position is overlap-free
     this.justPlacedBall = false; // Safety flag to ignore simulated click events immediately after drop
 
     // Active status
@@ -94,16 +95,68 @@ export class AimingControls {
     }
   }
 
+  /**
+   * Returns true if (x, y) is a valid cue ball position — i.e. it does not
+   * overlap or touch any live target ball. Centres must be > 2*radius apart.
+   * @param {number} x Canvas X
+   * @param {number} y Canvas Y
+   * @returns {boolean}
+   */
+  isValidCueBallPosition(x, y) {
+    const minDist = this.config.ball.radius * 2 + 1; // slight buffer avoids "kissing" edge cases
+    const balls = this.physics?.targetBalls || [];
+    for (const ball of balls) {
+      const dx = x - ball.position.x;
+      const dy = y - ball.position.y;
+      if (Math.sqrt(dx * dx + dy * dy) < minDist) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Moves the cue ball to (clampedX, clampedY) during BIH and
+   * updates validity state + button appearance in one place.
+   * @param {number} x Raw canvas X
+   * @param {number} y Raw canvas Y
+   */
+  _placeCueBallAt(x, y) {
+    const cueBall = this.physics.cueBall;
+    const clampedX = Math.max(124, Math.min(900, x));
+    const clampedY = Math.max(150, Math.min(526, y));
+
+    Matter.Body.setPosition(cueBall, { x: clampedX, y: clampedY });
+    Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
+    Matter.Body.setAngularVelocity(cueBall, 0);
+
+    const valid = this.isValidCueBallPosition(clampedX, clampedY);
+    this.cueBallPositionValid = valid;
+
+    // Update confirm button state
+    const btn = document.getElementById('confirm-placement-btn');
+    if (btn) {
+      btn.disabled = !valid;
+      btn.textContent = valid ? 'CONFIRM POSITION' : '⚠ OVERLAPPING BALL';
+      btn.style.background = valid
+        ? 'linear-gradient(135deg, #00e5ff 0%, #0077aa 100%)'
+        : 'linear-gradient(135deg, #ff5252 0%, #b71c1c 100%)';
+      btn.style.cursor = valid ? 'pointer' : 'not-allowed';
+    }
+  }
+
   confirmCueBallPlacement() {
+    // Block confirmation if position is invalid
+    if (!this.cueBallPositionValid) return;
+
     this.hasBallInHand = false;
     this.isPlacingCueBall = false;
-    
+    this.cueBallPositionValid = true;
+
     // Just placed ball safety flag to prevent immediate aim-locking on pointerup simulated clicks
     this.justPlacedBall = true;
     setTimeout(() => {
       this.justPlacedBall = false;
     }, 250);
-    
+
     console.log("Cue ball placement confirmed.");
   }
 
@@ -202,16 +255,9 @@ export class AimingControls {
 
         // Ensure they touched inside the table felt area (below HUD)
         if (mouseY > 100) {
-          const cueBall = this.physics.cueBall;
           this.isPlacingCueBall = true;
           this.activePointerId = e.pointerId;
-
-          // Instantly teleport the cue ball to the touch location clamped to bounds
-          const clampedX = Math.max(124, Math.min(900, mouseX));
-          const clampedY = Math.max(150, Math.min(526, mouseY));
-          Matter.Body.setPosition(cueBall, { x: clampedX, y: clampedY });
-          Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
-          Matter.Body.setAngularVelocity(cueBall, 0);
+          this._placeCueBallAt(mouseX, mouseY);
         }
         return; // Complete lockout: don't allow falling through to aiming / slider while hasBallInHand is active
       }
@@ -287,12 +333,7 @@ export class AimingControls {
 
       if (this.hasBallInHand) {
         if (this.isPlacingCueBall) {
-          const cueBall = this.physics.cueBall;
-          const clampedX = Math.max(124, Math.min(900, mouseX));
-          const clampedY = Math.max(150, Math.min(526, mouseY));
-          Matter.Body.setPosition(cueBall, { x: clampedX, y: clampedY });
-          Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
-          Matter.Body.setAngularVelocity(cueBall, 0);
+          this._placeCueBallAt(mouseX, mouseY);
         }
         return; // Lock out aiming pointer movements during Ball-In-Hand
       }
@@ -482,35 +523,4 @@ export class AimingControls {
       const Tx = closestTarget.position.x;
       const Ty = closestTarget.position.y;
       const Gx = ghostCenter.x;
-      const Gy = ghostCenter.y;
-
-      // Normal vector from ghost center → target center (direction target ball travels post-collision)
-      const Nx = Tx - Gx;
-      const Ny = Ty - Gy;
-      const dist = Math.sqrt(Nx * Nx + Ny * Ny);
-      if (dist > 0.001) {
-        const dx = Nx / dist;
-        const dy = Ny / dist;
-
-        const pocketRadius = this.config.pocket.radius;
-        const { xCenter, yCenter, width, height } = this.config.table;
-        const { sideOffset } = this.config.pocket;
-        const hw = width / 2;
-        const hh = height / 2;
-        const pocketPositions = [
-          { x: xCenter - hw, y: yCenter - hh }, // 0: TL
-          { x: xCenter + hw, y: yCenter - hh }, // 1: TR
-          { x: xCenter - hw, y: yCenter + hh }, // 2: BL
-          { x: xCenter + hw, y: yCenter + hh }, // 3: BR
-          { x: xCenter, y: yCenter - hh - sideOffset }, // 4: ST
-          { x: xCenter, y: yCenter + hh + sideOffset }  // 5: SB
-        ];
-
-        let minProj = Infinity;
-        pocketPositions.forEach((pos, idx) => {
-          const Vx = pos.x - Tx;
-          const Vy = pos.y - Ty;
-          const proj = Vx * dx + Vy * dy;
-          if (proj > 0) {
-            const distSq = (Vx * Vx + Vy * Vy) - proj * proj;
-            if (distSq 
+      const Gy
