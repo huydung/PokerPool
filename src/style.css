@@ -199,7 +199,6 @@ canvas {
   text-align: center;
   box-shadow: 0 15px 35px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 229, 255, 0.2);
   width: 250px;
-  animation: suitCardScaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -214,7 +213,6 @@ canvas {
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 45px rgba(255, 215, 0, 0.25);
   max-width: 420px;
   width: 85%;
-  animation: suitCardScaleIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -389,10 +387,6 @@ canvas {
   background: rgba(255, 255, 255, 0.05);
 }
 
-@keyframes suitCardScaleIn {
-  0% { transform: scale(0.8); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
 
 .suit-mapping-title {
   color: #00e5ff;
@@ -581,7 +575,6 @@ canvas {
   width: 90%;
   max-width: 580px;
   padding: 25px;
-  animation: suitCardScaleIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: flex;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 45px rgba(0, 229, 255, 0.2);
 }
@@ -677,4 +670,12 @@ canvas {
   transform: scale(0.98);
 }
 
-/*
+/* ==========================================================================
+   RULES REFERENCE BUTTON (? icon, always visible)
+   ========================================================================== */
+.hud-rules-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(255,255,255,0.08);
+  color: #90caf

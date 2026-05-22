@@ -52,6 +52,10 @@ export class CanvasRenderer {
     // Slider overlay graphics
     this.sliderGraphics = new Graphics();
 
+    // Callback fired when the Stand button is clicked.
+    // Set by GameEngine.startMatch — avoids renderer reaching into gameRef for this action.
+    this.onStandRequested = null;
+
     // Active Player Turn Name tracking
     this.player1Name = this.config.rules?.player1Name || 'Alice';
     this.player2Name = this.config.rules?.player2Name || 'Bob';
@@ -1138,9 +1142,4 @@ export class CanvasRenderer {
     const existingP1Btn = document.getElementById('p1-stand-btn');
     if (existingP1Btn) existingP1Btn.remove();
     const existingP2Btn = document.getElementById('p2-stand-btn');
-    if (existingP2Btn) existingP2Btn.remove();
-
-    if (this.gameRef && !this.gameRef.gameEnded) {
-      const container = document.getElementById('game-container') || document.body;
-
-      /
+    i
