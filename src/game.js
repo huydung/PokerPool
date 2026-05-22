@@ -275,13 +275,49 @@ export class GameEngine {
 
   /**
    * Processes normal target ball scoring, suit mapping, phase transitions, and wildcard drops.
+   * Scratch rule: if the cue ball was pocketed on this shot the entire shot is voided —
+   * all co-pocketed target balls respawn with no cards awarded, no suit mappings made.
    * @param {PhysicsEngine} physics The active PhysicsEngine instance
    */
   async processNormalPocketedBalls(physics) {
     if (this.gameEnded) return;
 
     const opponent = this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
-    
+
+    // ── SCRATCH FIRST-CHECK ──────────────────────────────────────────────────
+    // A scratch (cue ball pocketed) voids the entire shot regardless of what
+    // else was pocketed. Respawn every co-pocketed ball, award nothing, end turn.
+    if (this.cueBallScratchThisShot) {
+      this.pocketedBallsDetails.forEach(({ ballId }) => {
+        const ball = (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId);
+        if (ball) {
+          physics.respawnBall(ball);
+          if (this.renderer) this.renderer.setBallVisibility(ball.id, true);
+        }
+      });
+
+      this.consecutiveMisses[this.activePlayer]++;
+      const isOpponentStanding = this.handsStood[opponent];
+      if (!isOpponentStanding) this.activePlayer = opponent;
+      if (this.controls) this.controls.hasBallInHand = true;
+
+      if (this.renderer) {
+        this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
+      }
+      console.log(`Scratch! All co-pocketed balls respawned. Turn → ${this.activePlayer} with Ball-in-Hand.`);
+
+      // Still need to check DQ after miss increment
+      const p1Misses = this.consecutiveMisses[this.player1Name] || 0;
+      const p2Misses = this.consecutiveMisses[this.player2Name] || 0;
+      if (p1Misses >= this.config.rules.maxConsecutiveMisses) {
+        this.showGameOver(this.player2Name, `${this.player1Name} hit ${this.config.rules.maxConsecutiveMisses} consecutive misses (including scratch) and is disqualified!`);
+      } else if (p2Misses >= this.config.rules.maxConsecutiveMisses) {
+        this.showGameOver(this.player1Name, `${this.player2Name} hit ${this.config.rules.maxConsecutiveMisses} consecutive misses (including scratch) and is disqualified!`);
+      }
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     let anyValidScore = false;
     let anyInvalidDrop = false;
 
@@ -425,7 +461,7 @@ export class GameEngine {
     // ---------------------------------------------------------------
     // Turn shift & consecutive-miss resolution (GDD Section 4 rules):
     //
-    //  • Scratch   → always ends turn, always increments miss counter.
+    //  • Scratch   → handled above (early return) — never reaches here.
     //  • Valid score only → keep turn (bonus loop), reset miss counter.
     //  • Valid score + invalid drop → valid score resets miss counter,
     //    but invalid drop still ends the turn (per GDD "turn shifts
@@ -433,13 +469,7 @@ export class GameEngine {
     //  • Invalid drop only → ends turn, increments miss counter.
     //  • Complete miss (nothing pocketed) → ends turn, increments miss counter.
     // ---------------------------------------------------------------
-    if (this.cueBallScratchThisShot) {
-      // Scratch overrides everything else — miss counter up, turn ends
-      this.consecutiveMisses[this.activePlayer]++;
-      if (!isOpponentStanding) this.activePlayer = opponent;
-      if (this.controls) this.controls.hasBallInHand = true;
-      console.log(`Scratch! Turn transitions to ${this.activePlayer}`);
-    } else if (anyValidScore && !anyInvalidDrop) {
+    if (anyValidScore && !anyInvalidDrop) {
       // Clean successful shot: bonus loop, miss counter reset
       this.consecutiveMisses[this.activePlayer] = 0;
       console.log(`${this.activePlayer} scored a card and keeps their turn.`);
@@ -474,14 +504,15 @@ export class GameEngine {
       return;
     }
 
-    // 3-Miss Elimination Rule
+    // 3-Miss Elimination Rule (scratch path already handled above — this covers non-scratch misses)
+    const maxMisses = this.config.rules.maxConsecutiveMisses;
     const p1Misses = this.consecutiveMisses[this.player1Name] || 0;
     const p2Misses = this.consecutiveMisses[this.player2Name] || 0;
 
-    if (p1Misses >= 3) {
-      this.showGameOver(this.player2Name, `${this.player1Name} hit 3 consecutive misses and is disqualified!`);
-    } else if (p2Misses >= 3) {
-      this.showGameOver(this.player1Name, `${this.player2Name} hit 3 consecutive misses and is disqualified!`);
+    if (p1Misses >= maxMisses) {
+      this.showGameOver(this.player2Name, `${this.player1Name} hit ${maxMisses} consecutive misses and is disqualified!`);
+    } else if (p2Misses >= maxMisses) {
+      this.showGameOver(this.player1Name, `${this.player2Name} hit ${maxMisses} consecutive misses and is disqualified!`);
     }
   }
 
@@ -863,40 +894,4 @@ export class GameEngine {
    * poker hand rankings, stand mechanic, and DQ rules.
    */
   showRulesModal() {
-    const container = document.getElementById('game-container') || document.body;
-    if (document.querySelector('.rules-modal-overlay')) return; // Already open
-
-    const overlay = document.createElement('div');
-    overlay.className = 'rules-modal-overlay';
-    overlay.innerHTML = `
-      <div class="rules-modal-card">
-        <h2 class="rules-modal-title">📖 How to Play</h2>
-
-        <div class="rules-section-header">The Goal</div>
-        <div class="rules-row">
-          <span class="rules-badge">🏆</span>
-          <span class="rules-text">Build the best <strong>5-card poker hand</strong> by pocketing pool balls. Each pocket is linked to a suit (♠ ♥ ♦ ♣). Pocket a ball → earn a card. Best hand at showdown wins.</span>
-        </div>
-
-        <div class="rules-section-header">Table & Pockets</div>
-        <div class="rules-row">
-          <span class="rules-badge">6</span>
-          <span class="rules-text">There are <strong>6 pockets</strong> — 4 corners + 2 side pockets. The first 4 balls pocketed into 4 different pockets each claim a <strong>suit</strong> for that pocket.</span>
-        </div>
-        <div class="rules-row">
-          <span class="rules-badge">★</span>
-          <span class="rules-text">Once 4 suits are claimed, the remaining 2 pockets become <strong>Wild</strong>. Pocketing into a Wild lets you choose any rank and suit (no duplicates in your own hand).</span>
-        </div>
-
-        <div class="rules-section-header">Earning Cards</div>
-        <div class="rules-row">
-          <span class="rules-badge">✅</span>
-          <span class="rules-text"><strong>Valid shot:</strong> Pocket any numbered ball (1–15) into a claimed or Wild pocket → earn one card. Your miss counter resets.</span>
-        </div>
-        <div class="rules-row">
-          <span class="rules-badge">🔁</span>
-          <span class="rules-text"><strong>Bonus turn:</strong> Score a valid card and your turn continues — keep shooting until you miss.</span>
-        </div>
-        <div class="rules-row">
-          <span class="rules-badge">⚠️</span>
-          <span class="rule
+    const container = document.getElemen
