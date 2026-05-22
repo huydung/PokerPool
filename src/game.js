@@ -344,6 +344,7 @@ export class GameEngine {
     }
 
     // ── Turn resolution ───────────────────────────────────────────────
+    const scorer = this.activePlayer; // capture before _resolveTurn may switch it
     this._resolveTurn(anyValidScore, invalidReasons, opponent);
 
     if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
@@ -359,8 +360,18 @@ export class GameEngine {
     const p2Misses = this.consecutiveMisses[this.player2Name] || 0;
     if (p1Misses >= maxMisses) {
       this.showGameOver(this.player2Name, `${this.player1Name} hit ${maxMisses} consecutive misses and is disqualified!`);
+      return;
     } else if (p2Misses >= maxMisses) {
       this.showGameOver(this.player1Name, `${this.player2Name} hit ${maxMisses} consecutive misses and is disqualified!`);
+      return;
+    }
+
+    // Stand Decision Modal: show whenever the scoring player just has exactly 5 cards
+    const scorerHand = this.hands[scorer] || [];
+    if (anyValidScore && scorerHand.length === 5 && !this.handsStood[scorer] && !this.gameEnded) {
+      await this.showStandDecisionModal(scorer);
+      // After the modal, re-sync HUD (triggerStand may have changed activePlayer)
+      if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
     }
   }
 
@@ -836,15 +847,4 @@ export class GameEngine {
       overlay.className = 'card-swap-overlay';
 
       const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
-      const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
-
-      let cardsHtml = '';
-      hand.forEach((card, idx) => {
-        const symbol = suitSymbols[card.suit];
-        const rankLabel = rankSymbols[card.rank] || card.rank.toString();
-        const isRed = card.suit === 'H' || card.suit === 'D';
-        cardsHtml += `
-          <div class="swap-card-item ${isRed ? 'red-suit' : ''}" data-index="${idx}">
-            <div class="preview-top">${rankLabel}</div>
-            <div class="preview-center">${symbol}</div>
-            <div class="preview-top" style="transform: rotate(180deg); 
+      const r

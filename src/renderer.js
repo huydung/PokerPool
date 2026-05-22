@@ -255,7 +255,6 @@ export class CanvasRenderer {
     const bg = new Graphics();
     bg.rect(0, 0, this.config.canvas.width, hudHeight);
     bg.fill({ color: 0x11192e, alpha: 0.95 });
-    bg.stroke({ color: 0x22355c, width: 2 });
     this.hudContainer.addChild(bg);
 
     // Fading gradient backgrounds behind player HUD panels but in front of base HUD bg
@@ -1138,8 +1137,8 @@ export class CanvasRenderer {
       }
     }
 
-    // 3b. Manage dynamic HTML STAND button overlays
-    const existingP1Btn = document.getElementById('p1-stand-btn');
-    if (existingP1Btn) existingP1Btn.remove();
-    const existingP2Btn = document.getElementById('p2-stand-btn');
-    i
+    // 4. Danger border — light up when active player is on their last heart
+    const maxMisses = this.config.rules?.maxConsecutiveMisses ?? 3;
+    const activeMisses = consecutiveMisses[activePlayer] || 0;
+    const inDanger = activeMisses >= maxMisses - 1; // 1 heart left
+    con

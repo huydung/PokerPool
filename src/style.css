@@ -638,38 +638,6 @@ canvas {
 }
 
 /* Dynamic STAND button in the HUD */
-.hud-stand-btn {
-  position: absolute;
-  top: 12px;
-  background: linear-gradient(135deg, #ff1744 0%, #d500f9 100%);
-  color: #ffffff;
-  border: 1px solid rgba(255, 23, 68, 0.4);
-  border-radius: 12px;
-  padding: 4px 12px;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 1px;
-  cursor: pointer;
-  z-index: 1002;
-  box-shadow: 0 0 10px rgba(255, 23, 68, 0.4);
-  text-transform: uppercase;
-  transition: all 0.2s ease-in-out;
-}
-.hud-stand-btn.p1-stand {
-  left: 210px;
-}
-.hud-stand-btn.p2-stand {
-  left: 635px;
-}
-.hud-stand-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 0 18px rgba(255, 23, 68, 0.8);
-  background: linear-gradient(135deg, #ff5252 0%, #e040fb 100%);
-}
-.hud-stand-btn:active {
-  transform: scale(0.98);
-}
-
 /* ==========================================================================
    RULES REFERENCE BUTTON (? icon, always visible)
    ========================================================================== */
@@ -678,4 +646,32 @@ canvas {
   top: 10px;
   right: 10px;
   background: rgba(255,255,255,0.08);
-  color: #90caf
+  color: #90caf9;
+  border: 1px solid rgba(144,202,249,0.3);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+  z-index: 1002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+.hud-rules-btn:hover {
+  background: rgba(144,202,249,0.2);
+  color: #e3f2fd;
+  border-color: rgba(144,202,249,0.7);
+  box-shadow: 0 0 12px rgba(144,202,249,0.4);
+  transform: scale(1.12);
+}
+
+/* ==========================================================================
+   RULES REFERENCE MODAL OVERLAY
+   ========================================================================== */
+.rules-modal-overlay {
+  position: absolute;
+  top: 0; left: 0;
