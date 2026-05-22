@@ -132,7 +132,7 @@ Your objective is to build the Core Turn Cycle, Hand Swapping mechanics, Wildcar
 2. HAND SWAPPING & WILDCARDS:
    - Create active hand arrays for each player, capped at 5 cards. Display the hands visually on screen using card sprites (e.g., Kenney Playing Cards).
    - 5-CARD SWAP DECISION: If a player with a full 5-card hand pockets another valid card, pause the turn and show a swap modal. The player must choose one of the 6 cards (their active 5 + the new card) to permanently discard before they can take a bonus shot.
-   - WILDCARD REGISTRATION: When ball 14 or 15 enters a Wild Pocket, open a custom select menu enabling the player to pick any Rank (A-K) and any Suit, provided the combination does not create a duplicate of any card already held by **either** player. Once used, permanently delete that wildcard ball from play.
+   - WILDCARD REGISTRATION: When ball 14 or 15 enters a Wild Pocket, open a custom select menu enabling the player to pick any Rank (A-K) and any claimed Suit, provided the combination does not create a duplicate of an existing card in their hand. Once used, permanently delete that wildcard ball from play.
 
 3. 3-MISS ELIMINATION:
    - Maintain a per-player consecutive miss counter. Increment by 1 on any failed shot, invalid pocket drop, or cue ball scratch.
@@ -216,4 +216,4 @@ Milestone 1 has been completely executed, tested, and validated. The following d
 - **Left Gutter Safety Guard**: Introduced a coordinate guard `if (mouseX < 112) return;` in `pointerdown` to ignore any off-target gutter clicks that missed the slider, completely preventing accidental lock resets/toggles.
 - **Verification**: Added TDD tests in `tests/aimLock.test.js` validating the unrestricted vertical bounds and gutter safety guard.
 
-All unit tests are **100% green and compile successfully**. The local development environment compiles clea
+All unit tests are **100% green and compile successfully**. The local development environment compiles cleanly.

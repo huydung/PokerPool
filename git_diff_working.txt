@@ -1,0 +1,445 @@
+﻿diff --git a/src/renderer.js b/src/renderer.js
+index 83bfe45..888d505 100644
+--- a/src/renderer.js
++++ b/src/renderer.js
+@@ -1,4 +1,4 @@
+-import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
++import { Application, Container, Graphics, Text, TextStyle, Sprite, Texture } from 'pixi.js';
+ import { CONFIG } from './config.js';
+ 
+ /**
+@@ -38,6 +38,12 @@ export class CanvasRenderer {
+     this.player1ScoreText = null;
+     this.player2ScoreText = null;
+     this.activePlayerText = null;
++    this.p1HUDContainer = null;
++    this.p2HUDContainer = null;
++    this.p1PanelBg = null;
++    this.p2PanelBg = null;
++    this.p1Hearts = [];
++    this.p2Hearts = [];
+ 
+     // Laser overlay graphics
+     this.aimGraphics = new Graphics();
+@@ -91,6 +97,56 @@ export class CanvasRenderer {
+     this.drawHUDLayout();
+   }
+ 
++  /**
++   * Helper to create a linear gradient texture using a 2D HTML Canvas
++   */
++  createGradientTexture(colorHex, fromLeft) {
++    const canvas = document.createElement('canvas');
++    canvas.width = 512;
++    canvas.height = 100;
++    const ctx = canvas.getContext('2d');
++    
++    // Convert hex color (e.g. 0x00e5ff) to CSS color string
++    const cssColor = '#' + colorHex.toString(16).padStart(6, '0');
++    
++    let gradient = ctx.createLinearGradient(0, 0, 512, 0);
++    if (fromLeft) {
++      gradient.addColorStop(0, cssColor);
++      gradient.addColorStop(0.15, cssColor); // Keep strong for first 15%
++      gradient.addColorStop(1, 'rgba(0,0,0,0)');
++    } else {
++      gradient.addColorStop(0, 'rgba(0,0,0,0)');
++      gradient.addColorStop(0.85, cssColor); // Keep strong towards the right edge
++      gradient.addColorStop(1, cssColor);
++    }
++    
++    ctx.fillStyle = gradient;
++    ctx.fillRect(0, 0, 512, 100);
++    
++    return Texture.from(canvas);
++  }
++
++  /**
++   * Helper to draw a mathematically precise, beautiful, symmetrical vector heart centered at (x, y)
++   */
++  drawHeart(graphics, x, y, size) {
++    graphics.clear();
++    const topY = y - size / 2;
++    const bottomY = y + size / 2;
++    const leftX = x - size / 2;
++    const rightX = x + size / 2;
++    
++    graphics.moveTo(x, y - size * 0.2);
++    // Left lobe
++    graphics.bezierCurveTo(x - size * 0.3, y - size * 0.6, leftX, y - size * 0.3, leftX, y + size * 0.05);
++    graphics.bezierCurveTo(leftX, y + size * 0.35, x - size * 0.25, y + size * 0.5, x, bottomY);
++    // Right lobe
++    graphics.bezierCurveTo(x + size * 0.25, y + size * 0.5, rightX, y + size * 0.35, rightX, y + size * 0.05);
++    graphics.bezierCurveTo(rightX, y - size * 0.3, x + size * 0.3, y - size * 0.6, x, y - size * 0.2);
++    
++    graphics.fill({ color: 0xffffff });
++  }
++
+   /**
+    * Draw the visual elements of the pool table felt, rails, cushions, and pockets.
+    */
+@@ -200,6 +256,21 @@ export class CanvasRenderer {
+     bg.stroke({ color: 0x22355c, width: 2 });
+     this.hudContainer.addChild(bg);
+ 
++    // Fading gradient backgrounds behind player HUD panels but in front of base HUD bg
++    this.p1GradientSprite = new Sprite(this.createGradientTexture(0x00e5ff, true));
++    this.p1GradientSprite.x = 0;
++    this.p1GradientSprite.y = 0;
++    this.p1GradientSprite.alpha = 0.35; // Premium glowing visual style
++    this.p1GradientSprite.visible = false;
++    this.hudContainer.addChild(this.p1GradientSprite);
++
++    this.p2GradientSprite = new Sprite(this.createGradientTexture(0xe040fb, false));
++    this.p2GradientSprite.x = 512;
++    this.p2GradientSprite.y = 0;
++    this.p2GradientSprite.alpha = 0.35; // Premium glowing visual style
++    this.p2GradientSprite.visible = false;
++    this.hudContainer.addChild(this.p2GradientSprite);
++
+     const titleStyle = new TextStyle({
+       fontFamily: 'Inter, Arial, sans-serif',
+       fontSize: 15,
+@@ -218,9 +289,24 @@ export class CanvasRenderer {
+     const p1Container = new Container();
+     p1Container.x = 40;
+     p1Container.y = 8;
++    this.p1HUDContainer = p1Container;
+ 
+-    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'ALICE'} (PLAYER 1)`, style: titleStyle });
++    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'ALICE'}`, style: titleStyle });
++    p1Title.x = 0;
++    p1Title.y = 0;
+     p1Container.addChild(p1Title);
++    this.p1TitleText = p1Title; // Save title reference
++
++    // Heart slots for P1 misses
++    for (let i = 0; i < 3; i++) {
++      const heart = new Graphics();
++      this.drawHeart(heart, 0, 0, 14);
++      heart.tint = 0xff1744;
++      heart.x = 142 + i * 18;
++      heart.y = 8;
++      p1Container.addChild(heart);
++      this.p1Hearts.push(heart);
++    }
+ 
+     const p1Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
+     p1Score.y = 20;
+@@ -246,11 +332,26 @@ export class CanvasRenderer {
+ 
+     // 2. Player 2 Info Panel
+     const p2Container = new Container();
+-    p2Container.x = 780;
++    p2Container.x = 754; // Symmetrically aligned (1024 - 40 - 230)
+     p2Container.y = 8;
++    this.p2HUDContainer = p2Container;
+ 
+-    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'BOB'} (PLAYER 2)`, style: titleStyle });
++    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'BOB'}`, style: titleStyle });
++    p2Title.x = 0;
++    p2Title.y = 0;
+     p2Container.addChild(p2Title);
++    this.p2TitleText = p2Title; // Save title reference
++
++    // Heart slots for P2 misses
++    for (let i = 0; i < 3; i++) {
++      const heart = new Graphics();
++      this.drawHeart(heart, 0, 0, 14);
++      heart.tint = 0xff1744;
++      heart.x = 142 + i * 18;
++      heart.y = 8;
++      p2Container.addChild(heart);
++      this.p2Hearts.push(heart);
++    }
+ 
+     const p2Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
+     p2Score.y = 20;
+@@ -274,39 +375,33 @@ export class CanvasRenderer {
+ 
+     this.hudContainer.addChild(p2Container);
+ 
+-    // 3. Center Status Panel (Turn indicator)
++    // 3. Center Status Panel (Beautiful modern reactive badge)
+     const centerContainer = new Container();
+-    centerContainer.x = 440;
+-    centerContainer.y = 10;
++    centerContainer.x = 392; // Centered exactly at (1024 - 240) / 2
++    centerContainer.y = 25; // Adjusted vertically for perfect centering
++
++    const centerBadgeBg = new Graphics();
++    centerBadgeBg.roundRect(0, 0, 240, 50, 25); // Sleek glassmorphic pill shape
++    centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
++    centerBadgeBg.stroke({ color: 0x00e5ff, width: 1.5, alpha: 0.8 });
++    centerContainer.addChild(centerBadgeBg);
++    this.centerBadgeBg = centerBadgeBg;
+ 
+     const activeTurnStyle = new TextStyle({
+       fontFamily: 'Inter, Arial, sans-serif',
+-      fontSize: 13,
+-      fontWeight: 'bold',
+-      fill: 0xffb300,
++      fontSize: 11,
++      fontWeight: '900',
++      fill: 0xffffff,
++      letterSpacing: 1.5,
+       align: 'center'
+     });
+ 
+-    this.activePlayerText = new Text({ text: `TURN: ${this.activePlayerName.toUpperCase()}\n(Click & Drag to Aim)`, style: activeTurnStyle });
+-    this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
++    this.activePlayerText = new Text({ text: `READY`, style: activeTurnStyle });
++    this.activePlayerText.anchor.set(0.5);
++    this.activePlayerText.x = 120; // Center of the 240px wide pill
++    this.activePlayerText.y = 25; // Center of the 50px high pill
+     centerContainer.addChild(this.activePlayerText);
+ 
+-    const separator = new Graphics();
+-    separator.roundRect(36, 50, 72, 24, 4);
+-    separator.fill({ color: 0xffb300, alpha: 0.1 });
+-    separator.stroke({ color: 0xffb300, width: 1.5 });
+-    
+-    const vsStyle = new TextStyle({
+-      fontFamily: 'Inter, Arial, sans-serif',
+-      fontSize: 10,
+-      fontWeight: 'bold',
+-      fill: 0xffb300
+-    });
+-    const vsText = new Text({ text: 'SANDBOX', style: vsStyle });
+-    vsText.x = 72 - vsText.width / 2;
+-    vsText.y = 54;
+-    centerContainer.addChild(separator, vsText);
+-
+     this.hudContainer.addChild(centerContainer);
+   }
+ 
+@@ -365,6 +460,14 @@ export class CanvasRenderer {
+         label.x = 0;
+         label.y = 0;
+         container.addChild(label);
++
++        // Add visual underline decoration for 6 and 9 pool balls on the table felt
++        if (textChar === '6' || textChar === '9') {
++          const underline = new Graphics();
++          underline.rect(-4, 4.5, 8, 1.5);
++          underline.fill({ color: isWildcard ? 0xb58e3d : 0x212121 });
++          container.addChild(underline);
++        }
+       }
+ 
+       return container;
+@@ -429,8 +532,37 @@ export class CanvasRenderer {
+   setActivePlayer(name) {
+     this.activePlayerName = name;
+     if (this.activePlayerText) {
+-      this.activePlayerText.text = `TURN: ${name.toUpperCase()}\n(Click & Drag to Aim)`;
+-      this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
++      const themeColor = name === this.player1Name ? 0x00e5ff : 0xe040fb;
++      this.activePlayerText.text = `${name.toUpperCase()}\n(Aim & Shoot)`;
++      if (this.centerBadgeBg) {
++        this.centerBadgeBg.clear();
++        this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
++        this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
++        this.centerBadgeBg.stroke({ color: themeColor, width: 1.5, alpha: 0.8 });
++      }
++      this.activePlayerText.style.fill = themeColor;
++    }
++
++    if (this.p1HUDContainer && this.p2HUDContainer) {
++      // Keep both panels clean at full opacity (1.0) at all times
++      this.p1HUDContainer.alpha = 1.0;
++      this.p2HUDContainer.alpha = 1.0;
++      
++      if (name === this.player1Name) {
++        // Player 1 Active
++        if (this.p1GradientSprite) this.p1GradientSprite.visible = true;
++        if (this.p2GradientSprite) this.p2GradientSprite.visible = false;
++        
++        if (this.p1TitleText) this.p1TitleText.style.fill = 0x00e5ff; // colorful
++        if (this.p2TitleText) this.p2TitleText.style.fill = 0xffffff; // white
++      } else {
++        // Player 2 Active
++        if (this.p1GradientSprite) this.p1GradientSprite.visible = false;
++        if (this.p2GradientSprite) this.p2GradientSprite.visible = true;
++        
++        if (this.p1TitleText) this.p1TitleText.style.fill = 0xffffff; // white
++        if (this.p2TitleText) this.p2TitleText.style.fill = 0xe040fb; // colorful
++      }
+     }
+   }
+ 
+@@ -503,10 +635,55 @@ export class CanvasRenderer {
+   drawAimLine(aimData) {
+     this.aimGraphics.clear();
+ 
++    if (this.gameRef && this.gameRef.controls && this.gameRef.controls.hasBallInHand) {
++      if (this.activePlayerText) {
++        this.activePlayerText.text = "BALL IN HAND\n(Drag Cue Ball)";
++        if (this.centerBadgeBg) {
++          this.centerBadgeBg.clear();
++          this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
++          this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
++          this.centerBadgeBg.stroke({ color: 0x00e676, width: 2, alpha: 0.9 });
++        }
++        this.activePlayerText.style.fill = 0x00e676;
++      }
++      
++      const cueBall = this.gameRef.controls.physics.cueBall;
++      if (cueBall) {
++        // Draw pulsing green ring around cue ball position
++        const startX = cueBall.position.x;
++        const startY = cueBall.position.y;
++        const pulse = 1 + Math.sin(Date.now() / 150) * 0.15;
++        const radius = this.config.ball.radius * pulse;
++        
++        // Outer glowing ring
++        this.aimGraphics.circle(startX, startY, radius + 6);
++        this.aimGraphics.stroke({
++          color: 0x00e676,
++          width: 3,
++          alpha: 0.8
++        });
++
++        // Inner glowing ring
++        this.aimGraphics.circle(startX, startY, radius + 2);
++        this.aimGraphics.stroke({
++          color: 0x00e676,
++          width: 1.5,
++          alpha: 0.4
++        });
++      }
++      return;
++    }
++
+     if (!aimData) {
+       if (this.activePlayerText) {
+-        this.activePlayerText.text = `TURN: ${this.activePlayerName.toUpperCase()}\n(Balls Rolling...)`;
+-        this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
++        this.activePlayerText.text = "BALLS ROLLING...";
++        if (this.centerBadgeBg) {
++          this.centerBadgeBg.clear();
++          this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
++          this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
++          this.centerBadgeBg.stroke({ color: 0x1e293b, width: 1.5, alpha: 0.8 });
++        }
++        this.activePlayerText.style.fill = 0x94a3b8;
+       }
+       return;
+     }
+@@ -517,11 +694,25 @@ export class CanvasRenderer {
+     // Update HUD center text based on lock state
+     if (this.activePlayerText) {
+       if (isLocked) {
+-        this.activePlayerText.text = "AIM LOCKED!\n(Drag Slider to Shoot ΓÇó Click to Unlock)";
++        this.activePlayerText.text = "AIM LOCKED\n(Pull Slider)";
++        if (this.centerBadgeBg) {
++          this.centerBadgeBg.clear();
++          this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
++          this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
++          this.centerBadgeBg.stroke({ color: 0xffd700, width: 2, alpha: 0.9 });
++        }
++        this.activePlayerText.style.fill = 0xffd700;
+       } else {
+-        this.activePlayerText.text = `TURN: ${this.activePlayerName.toUpperCase()}\n(Move Mouse to Aim ΓÇó Click to Lock)`;
++        const themeColor = this.activePlayerName === this.player1Name ? 0x00e5ff : 0xe040fb;
++        this.activePlayerText.text = `${this.activePlayerName.toUpperCase()}\n(Aim & Shoot)`;
++        if (this.centerBadgeBg) {
++          this.centerBadgeBg.clear();
++          this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
++          this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
++          this.centerBadgeBg.stroke({ color: themeColor, width: 1.5, alpha: 0.8 });
++        }
++        this.activePlayerText.style.fill = themeColor;
+       }
+-      this.activePlayerText.x = 72 - this.activePlayerText.width / 2;
+     }
+ 
+     // A. Draw the solid interactive cue stick pointing towards the cue ball
+@@ -720,7 +911,7 @@ export class CanvasRenderer {
+   /**
+    * Renders a styled mini card graphic on the HUD player panels.
+    */
+-  renderCardOnHUD(container, card, idx) {
++  renderCardOnHUD(container, card, idx, themeColor = 0x213359) {
+     const cardView = new Container();
+     cardView.x = idx * 40;
+ 
+@@ -728,7 +919,7 @@ export class CanvasRenderer {
+     const base = new Graphics();
+     base.roundRect(0, 0, 32, 46, 4);
+     base.fill({ color: 0xffffff });
+-    base.stroke({ color: 0x00e5ff, width: 1.5 });
++    base.stroke({ color: themeColor, width: 1.5 });
+     cardView.addChild(base);
+ 
+     // Text details (rank and suit symbol)
+@@ -752,6 +943,14 @@ export class CanvasRenderer {
+     rankText.y = 15;
+     cardView.addChild(rankText);
+ 
++    // Draw horizontal underline for 6 and 9 mini-cards on HUD
++    if (rankStr === '6' || rankStr === '9') {
++      const underline = new Graphics();
++      underline.rect(11, 21, 10, 1.5);
++      underline.fill({ color: fillStyle });
++      cardView.addChild(underline);
++    }
++
+     const suitStyle = new TextStyle({
+       fontFamily: 'Inter, Arial, sans-serif',
+       fontSize: 16,
+@@ -782,13 +981,13 @@ export class CanvasRenderer {
+     // 2. Render cards
+     if (this.p1CardsContainer) {
+       p1Hand.forEach((card, idx) => {
+-        this.renderCardOnHUD(this.p1CardsContainer, card, idx);
++        this.renderCardOnHUD(this.p1CardsContainer, card, idx, 0x00e5ff); // Cyan border for P1 Alice
+       });
+     }
+ 
+     if (this.p2CardsContainer) {
+       p2Hand.forEach((card, idx) => {
+-        this.renderCardOnHUD(this.p2CardsContainer, card, idx);
++        this.renderCardOnHUD(this.p2CardsContainer, card, idx, 0xe040fb); // Purple border for P2 Bob
+       });
+     }
+ 
+@@ -797,11 +996,36 @@ export class CanvasRenderer {
+     const p2Misses = consecutiveMisses[this.player2Name] || 0;
+ 
+     if (this.player1ScoreText) {
+-      this.player1ScoreText.text = `Hand Cards (${p1Hand.length}/5) - Misses: ${p1Misses}`;
++      this.player1ScoreText.text = `Hand Cards (${p1Hand.length}/5)`;
+     }
+ 
+     if (this.player2ScoreText) {
+-      this.player2ScoreText.text = `Hand Cards (${p2Hand.length}/5) - Misses: ${p2Misses}`;
++      this.player2ScoreText.text = `Hand Cards (${p2Hand.length}/5)`;
++    }
++
++    // Update hearts indicators for misses (3-miss rule)
++    for (let i = 0; i < 3; i++) {
++      if (this.p1Hearts[i]) {
++        if (i < 3 - p1Misses) {
++          this.p1Hearts[i].tint = 0xff1744; // Active bright red
++          this.p1Hearts[i].alpha = 1.0;
++        } else {
++          this.p1Hearts[i].tint = 0x334155; // Missed dark slate
++          this.p1Hearts[i].alpha = 0.3;
++        }
++      }
++    }
++
++    for (let i = 0; i < 3; i++) {
++      if (this.p2Hearts[i]) {
++        if (i < 3 - p2Misses) {
++          this.p2Hearts[i].tint = 0xff1744; // Active bright red
++          this.p2Hearts[i].alpha = 1.0;
++        } else {
++          this.p2Hearts[i].tint = 0x334155; // Missed dark slate
++          this.p2Hearts[i].alpha = 0.3;
++        }
++      }
+     }
+ 
+     // 4. Update the turn text

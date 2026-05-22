@@ -42,7 +42,6 @@ When an AI developer or agent is acting upon the workspace, it is required to ex
 
 -   **Automated Workspace Diagnostics:** Prior to signaling completion of a task, the AI must automatically verify that the local development server (e.g., Vite, Webpack) is running. If offline, it must trigger the start command.
 -   **Health and Compilation Checks:** The AI must run a background check to confirm the build compiles cleanly without errors before reporting success.
--   **Build Tool Sandbox Limitation:** Vite 8 + rolldown uses native Node bindings (`@rolldown/binding-linux-x64-gnu`) that fail in sandboxed CI/AI Linux environments with EPERM errors. In those environments, the dev server (`vite`) and test runner (`vitest`) cannot be executed. The user must run these locally on their own machine (Windows). The AI should not patch Vite internals to work around this — it breaks the user's local server.
 
 ### 2.3 Post-Prompt Communication Template
 
@@ -50,3 +49,11 @@ At the conclusion of **every single prompt response**, the AI must print a promi
 
 ```
 ======================================================================
+🚀 PROTOTYPE RUNTIME STATUS
+======================================================================
+* CURRENT BRANCH     : [Active Git Branch Name]
+* LAST EDITS MADE    : [Summary of behavioral changes made in this turn]
+* LOCAL TESTING URL  : http://localhost:5173  (Or active dev port)
+* CONFIG FILE TO EDIT: /src/config.js  (Modify this to tweak values)
+======================================================================
+```
