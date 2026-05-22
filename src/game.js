@@ -304,6 +304,9 @@ export class GameEngine {
       if (this.renderer) {
         this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
       }
+      const scratchCount = this.pocketedBallsDetails.length;
+      const respawnNote = scratchCount > 0 ? ` — ${scratchCount} ball${scratchCount > 1 ? 's' : ''} respawned` : '';
+      this.showShotToast(`🎱 Scratch! Ball-in-Hand for opponent${respawnNote}`, 'scratch');
       console.log(`Scratch! All co-pocketed balls respawned. Turn → ${this.activePlayer} with Ball-in-Hand.`);
 
       // Still need to check DQ after miss increment
@@ -338,9 +341,11 @@ export class GameEngine {
             const selectedSuit = await this.promptSuitMapping(this.activePlayer, pocketId, ballId);
             this.pocketSuits[pocketId] = selectedSuit;
 
-            // Register card if not already held
+            // Register card if not already held by either player
             const hand = this.hands[this.activePlayer] || [];
-            const hasCard = hand.some(c => c.rank === ballId && c.suit === selectedSuit);
+            const opponentHand1 = this.hands[opponent] || [];
+            const hasCard = hand.some(c => c.rank === ballId && c.suit === selectedSuit)
+                         || opponentHand1.some(c => c.rank === ballId && c.suit === selectedSuit);
             if (!hasCard) {
               if (hand.length < 5) {
                 hand.push({ rank: ballId, suit: selectedSuit });
@@ -385,10 +390,12 @@ export class GameEngine {
           if (this.renderer) this.renderer.setBallVisibility(originalBall.id, true);
           anyInvalidDrop = true;
         } else {
-          // Mapped suit pocket
+          // Mapped suit pocket — block if either player already holds this card
           const hand = this.hands[this.activePlayer] || [];
-          const hasCard = hand.some(c => c.rank === ballId && c.suit === suit);
-          
+          const opponentHand2 = this.hands[opponent] || [];
+          const hasCard = hand.some(c => c.rank === ballId && c.suit === suit)
+                       || opponentHand2.some(c => c.rank === ballId && c.suit === suit);
+
           if (!hasCard) {
             if (hand.length < 5) {
               hand.push({ rank: ballId, suit });
@@ -417,9 +424,11 @@ export class GameEngine {
         if (suit === 'W') {
           // Wildcard in wild pocket is VALID
           const chosenCard = await this.promptWildcardSelection(this.activePlayer);
-          
+
           const hand = this.hands[this.activePlayer] || [];
-          const hasCard = hand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit);
+          const opponentHandW = this.hands[opponent] || [];
+          const hasCard = hand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit)
+                       || opponentHandW.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit);
           
           if (!hasCard) {
             if (hand.length < 5) {
@@ -472,22 +481,29 @@ export class GameEngine {
     if (anyValidScore && !anyInvalidDrop) {
       // Clean successful shot: bonus loop, miss counter reset
       this.consecutiveMisses[this.activePlayer] = 0;
+      const handSize = (this.hands[this.activePlayer] || []).length;
+      this.showShotToast(`✅ Scored! ${this.activePlayer} earns a card (${handSize}/5) — bonus turn`, 'score');
       console.log(`${this.activePlayer} scored a card and keeps their turn.`);
     } else if (anyValidScore && anyInvalidDrop) {
       // Mixed shot: scored at least one valid card so miss counter resets,
       // but also dropped at least one invalid ball so turn ends
       this.consecutiveMisses[this.activePlayer] = 0;
       if (!isOpponentStanding) this.activePlayer = opponent;
+      this.showShotToast(`⚠️ Mixed shot — valid card scored, but an invalid drop ends the turn`, 'mixed');
       console.log(`${this.activePlayer} had a mixed shot (valid + invalid). Miss counter reset, turn ends.`);
     } else if (anyInvalidDrop) {
       // Only invalid drops, no valid score
+      const prevPlayer = this.activePlayer;
       this.consecutiveMisses[this.activePlayer]++;
+      const missCount = this.consecutiveMisses[prevPlayer];
       if (!isOpponentStanding) this.activePlayer = opponent;
+      this.showShotToast(`🚫 Invalid drop — card already held by a player (miss #${missCount})`, 'invalid');
       console.log(`Invalid drop! Turn transitions to ${this.activePlayer}`);
     } else {
       // Complete miss — nothing pocketed at all
       this.consecutiveMisses[this.activePlayer]++;
       if (!isOpponentStanding) this.activePlayer = opponent;
+      this.showShotToast(`💨 Miss — no balls pocketed. Turn → ${this.activePlayer}`, 'miss');
       console.log(`Miss. Turn transitions to ${this.activePlayer}`);
     }
 
@@ -615,10 +631,14 @@ export class GameEngine {
       this.controls.enabled = false;
       const container = document.getElementById('game-container') || document.body;
 
-      // Per GDD Section 4: duplicate prevention is scoped to the active player's own hand only.
-      // A wildcard may NOT replicate a card the player already holds.
+      // No card may be duplicated across either player's hand.
+      // A wildcard choice is blocked if that exact rank+suit is already held by anyone.
       const playerHand = this.hands[player] || [];
-      const isOccupied = (r, s) => playerHand.some(c => c.rank === r && c.suit === s);
+      const opponentName = player === this.player1Name ? this.player2Name : this.player1Name;
+      const opponentHandWild = this.hands[opponentName] || [];
+      const isOccupied = (r, s) =>
+        playerHand.some(c => c.rank === r && c.suit === s) ||
+        opponentHandWild.some(c => c.rank === r && c.suit === s);
       const suits = ['S', 'H', 'D', 'C'];
       const allSuitsOccupied = (r) => suits.every(s => isOccupied(r, s));
 
@@ -846,52 +866,4 @@ export class GameEngine {
 
       cardElements.forEach(elem => {
         elem.addEventListener('click', () => {
-          cardElements.forEach(e => e.classList.remove('selected'));
-          elem.classList.add('selected');
-          selectedIdx = parseInt(elem.getAttribute('data-index'));
-        });
-      });
-
-      const confirmBtn = overlay.querySelector('#swap-confirm-btn');
-      confirmBtn.addEventListener('click', () => {
-        if (selectedIdx < 0 || selectedIdx >= hand.length) return;
-        
-        // Remove the selected card from hand
-        hand.splice(selectedIdx, 1);
-
-        overlay.style.opacity = '0';
-        setTimeout(() => {
-          overlay.remove();
-          this.controls.enabled = true;
-          if (this.renderer) {
-            this.renderer.updateHUD(this.hands, this.activePlayer, this.consecutiveMisses);
-          }
-          resolve();
-        }, 350);
-      });
-    });
-  }
-
-  /**
-   * Creates and appends the persistent ? rules button to the HUD.
-   * Safe to call multiple times — skips if already present.
-   * @param {HTMLElement} container The game container DOM element
-   */
-  _injectRulesButton(container) {
-    if (document.getElementById('rules-help-btn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'rules-help-btn';
-    btn.className = 'hud-rules-btn';
-    btn.title = 'Rules Reference';
-    btn.textContent = '?';
-    btn.addEventListener('click', () => this.showRulesModal());
-    container.appendChild(btn);
-  }
-
-  /**
-   * Opens the full scrollable rules reference modal.
-   * Covers all game rules: table layout, pockets/suits, card scoring,
-   * poker hand rankings, stand mechanic, and DQ rules.
-   */
-  showRulesModal() {
-    const container = document.getElemen
+          cardEl
