@@ -102,10 +102,20 @@ export class GameEngine {
     this.pocketedBallsThisShot = [];
     this.pocketedBallsDetails = [];
     this.cueBallScratchThisShot = false;
+    /** True between handleShotStart and handleShotEnd — gates pocket overlap events */
+    this._shotInProgress = false;
 
     // Pocket mapping & phase transition
     this.pocketSuits = new Array(6).fill(null);
     this.phase = 1;
+
+    // ── Cheat mode ────────────────────────────────────────────────────────────
+    this.cheatEnabled = false;
+    /** Ordered list of physics bodies selected for cheat pocket simulation */
+    this._cheatBallSelections = [];   // Array<Matter.Body>
+    /** Ordered list of pocket indices selected for cheat simulation */
+    this._cheatPocketSelections = []; // Array<number>
+    this._cheatAwaitingFinish = false; // true while Finish Shot button is visible
   }
 
   get opponent() {
@@ -167,7 +177,12 @@ export class GameEngine {
           this.isTossing = false;
           this.controls.enabled = true;
 
-          this._injectRulesButton(container);
+          // Wire the right-panel "?" button to the rules modal (Pixi-native button,
+          // no HTML injection needed — the panel is drawn in renderer.drawRightPanel)
+          if (this.renderer) {
+            this.renderer.onRulesRequest = () => this.showRulesModal();
+          }
+
           this.renderer.setActivePlayer(this.activePlayer);
 
           console.log(`Coin Toss: ${this.activePlayer} breaks.`);
@@ -177,12 +192,29 @@ export class GameEngine {
     });
   }
 
+  /**
+   * Records a pocket event for the current shot.
+   * Returns true if the event was accepted (shot in progress), false if phantom.
+   * Phantom events (ball crept in after shot declared over) should be respawned
+   * by the caller — this method does NOT touch physics.
+   */
   handlePocketOverlap(ball, pocketId = -1) {
     if (ball.label === 'cue_ball') {
+      if (!this._shotInProgress) {
+        // Cue ball scratch outside of shot window — ignore (BIH already being placed)
+        console.log(`[POCKET] Cue ball scratch ignored — no shot in progress (phantom event)`);
+        return false;
+      }
       this.cueBallScratchThisShot = true;
       console.log(`[POCKET] Cue ball scratched → pocket ${pocketId}`);
+      return true;
     } else {
       const ballId = ball.plugin.ballId;
+      if (!this._shotInProgress) {
+        // Ball crept into pocket after shot was declared over — phantom event
+        console.warn(`[POCKET] PHANTOM: Ball ${ballId} entered pocket ${pocketId} outside shot window — caller should respawn`);
+        return false; // Signal: caller must respawn
+      }
       if (!this.pocketedBallsThisShot.includes(ballId)) {
         this.pocketedBallsThisShot.push(ballId);
         this.pocketedBallsDetails.push({ ballId, ball, pocketId });
@@ -191,6 +223,7 @@ export class GameEngine {
       } else {
         console.log(`[POCKET] Ball ${ballId} pocket event de-duped (already recorded this shot)`);
       }
+      return true;
     }
   }
 
@@ -198,11 +231,13 @@ export class GameEngine {
     this.pocketedBallsThisShot = [];
     this.pocketedBallsDetails = [];
     this.cueBallScratchThisShot = false;
+    this._shotInProgress = true;
     console.log(`[SHOT_START] Registers cleared — ${this.activePlayer}'s shot`);
   }
 
   async handleShotEnd(physics) {
     if (this.gameEnded) return;
+    this._shotInProgress = false; // Close the shot window immediately
 
     console.log(`[SHOT_END] player=${this.activePlayer} break=${this.isBreakShot} scratch=${this.cueBallScratchThisShot} pocketed=[${this.pocketedBallsThisShot.join(',')}]`);
 
@@ -236,6 +271,9 @@ export class GameEngine {
       this.renderer.setActivePlayer(this.activePlayer);
       this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
     }
+
+    // After each shot, refresh Finish Shot button visibility for cheat mode
+    this._updateCheatFinishButton(physics);
   }
 
   async _handleBreakShot(physics, opponent) {
@@ -1036,15 +1074,171 @@ export class GameEngine {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // CHEAT SYSTEM
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Enables or disables cheat mode. Updates controls flag and shows/hides
+   * the Finish Shot button based on current game state.
+   * @param {boolean} enabled
+   * @param {object}  physics  PhysicsEngine reference (used to check break state)
+   */
+  setCheatEnabled(enabled, physics) {
+    this.cheatEnabled = enabled;
+    if (this.controls) {
+      this.controls.cheatEnabled = enabled;
+    } else {
+      console.warn('[CHEAT] setCheatEnabled: controls not wired to game — cheatEnabled not propagated to controls');
+    }
+
+    // Clear any pending selections when toggling
+    this._resetCheatSelections();
+
+    if (!enabled) {
+      if (this.renderer) this.renderer.setCheatFinishButton(false);
+      this._cheatAwaitingFinish = false;
+      console.log('[CHEAT] Disabled — selections cleared, finish button hidden');
+    } else {
+      console.log(`[CHEAT] Enabled — checking if Finish Shot should show: isBreakShot=${this.isBreakShot} gameEnded=${this.gameEnded} shotInProgress=${this._shotInProgress}`);
+      // Show Finish Shot button only when appropriate (normal shot, balls stopped)
+      this._updateCheatFinishButton(physics);
+    }
+  }
+
+  /**
+   * Shows or hides the Finish Shot button based on current game state.
+   * Called after every shot end and on cheat toggle.
+   * @param {object} physics
+   */
+  _updateCheatFinishButton(physics) {
+    if (!this.cheatEnabled || !this.renderer) {
+      console.log(`[CHEAT] updateFinishBtn skipped: enabled=${this.cheatEnabled} renderer=${!!this.renderer}`);
+      return;
+    }
+    const allStopped = physics?.areAllBallsStopped() ?? false;
+    const show = !this.isBreakShot && !this.gameEnded && allStopped;
+    console.log(`[CHEAT] updateFinishBtn: show=${show} isBreakShot=${this.isBreakShot} gameEnded=${this.gameEnded} allStopped=${allStopped}`);
+    this.renderer.setCheatFinishButton(show);
+    this._cheatAwaitingFinish = show;
+  }
+
+  /**
+   * Called by controls when a ball is clicked in cheat mode.
+   * Toggles the ball in the selection list and updates visual highlight.
+   * @param {Matter.Body} ball
+   */
+  handleCheatBallClick(ball) {
+    if (!this.cheatEnabled) {
+      console.log(`[CHEAT] Ball click ignored: cheat not enabled`);
+      return;
+    }
+    if (!this._cheatAwaitingFinish) {
+      console.warn(`[CHEAT] Ball click ignored: _cheatAwaitingFinish=false (Finish Shot button not active). isBreakShot=${this.isBreakShot} gameEnded=${this.gameEnded}`);
+      return;
+    }
+
+    const idx = this._cheatBallSelections.findIndex(b => b.id === ball.id);
+    if (idx >= 0) {
+      // Deselect
+      this._cheatBallSelections.splice(idx, 1);
+      if (this.renderer) this.renderer.setCheatBallSelected(ball.id, false);
+      console.log(`[CHEAT] Deselected ball ${ball.plugin?.ballId ?? 'cue'} — selections: [${this._cheatBallSelections.map(b=>b.plugin?.ballId??'cue').join(',')}]`);
+    } else {
+      // Select
+      this._cheatBallSelections.push(ball);
+      if (this.renderer) this.renderer.setCheatBallSelected(ball.id, true);
+      console.log(`[CHEAT] Selected ball ${ball.plugin?.ballId ?? 'cue'} — selections: [${this._cheatBallSelections.map(b=>b.plugin?.ballId??'cue').join(',')}]`);
+    }
+  }
+
+  /**
+   * Called by controls when a pocket is clicked in cheat mode.
+   * Toggles the pocket in the selection list and updates visual highlight.
+   * @param {number} pocketId
+   */
+  handleCheatPocketClick(pocketId) {
+    if (!this.cheatEnabled) {
+      console.log(`[CHEAT] Pocket click ignored: cheat not enabled`);
+      return;
+    }
+    if (!this._cheatAwaitingFinish) {
+      console.warn(`[CHEAT] Pocket click ignored: _cheatAwaitingFinish=false. isBreakShot=${this.isBreakShot} gameEnded=${this.gameEnded}`);
+      return;
+    }
+
+    const idx = this._cheatPocketSelections.indexOf(pocketId);
+    if (idx >= 0) {
+      // Deselect
+      this._cheatPocketSelections.splice(idx, 1);
+      if (this.renderer) this.renderer.setCheatPocketSelected(pocketId, false);
+      console.log(`[CHEAT] Deselected pocket ${pocketId} — selections: [${this._cheatPocketSelections.join(',')}]`);
+    } else {
+      // Select
+      this._cheatPocketSelections.push(pocketId);
+      if (this.renderer) this.renderer.setCheatPocketSelected(pocketId, true);
+      console.log(`[CHEAT] Selected pocket ${pocketId} — selections: [${this._cheatPocketSelections.join(',')}]`);
+    }
+  }
+
+  /**
+   * Clears all cheat selections and visual highlights.
+   */
+  _resetCheatSelections() {
+    this._cheatBallSelections = [];
+    this._cheatPocketSelections = [];
+    if (this.renderer) this.renderer.clearCheatSelections();
+  }
+
+  /**
+   * Executes the cheat shot: simulates the selected balls being pocketed
+   * in the selected pockets, then runs the full normal shot-end processing.
+   *
+   * Pairing rule: ball[i] → pocket[i % pockets.length].
+   * If no pockets selected but balls are, the first unassigned pocket is used.
+   * @param {object} physics  PhysicsEngine reference
+   * @param {function} onPocketFn  The shared pocket-overlap handler from main.js
+   */
+  async executeCheatShot(physics, onPocketFn) {
+    if (!this._cheatAwaitingFinish) return;
+    if (this._cheatBallSelections.length === 0 && !this.cueBallScratchThisShot) {
+      // Nothing selected → treat as a miss (no balls pocketed)
+      console.log('[CHEAT] Finish Shot with no balls selected → treating as miss');
+    }
+
+    console.log(`[CHEAT] Executing shot: balls=[${this._cheatBallSelections.map(b=>b.plugin?.ballId??'cue').join(',')}] pockets=[${this._cheatPocketSelections.join(',')}]`);
+
+    // Hide Finish Shot button immediately
+    this._cheatAwaitingFinish = false;
+    if (this.renderer) this.renderer.setCheatFinishButton(false);
+
+    // Clear registers before simulating pocket events
+    this.handleShotStart();
+
+    // Simulate each ball being pocketed
+    const pocketCount = this._cheatPocketSelections.length;
+    this._cheatBallSelections.forEach((ball, i) => {
+      const pocketId = pocketCount > 0
+        ? this._cheatPocketSelections[i % pocketCount]
+        : 0; // fallback: first pocket if none explicitly chosen
+      onPocketFn(ball, pocketId);
+    });
+
+    // Clear visual selections before processing (avoid stale rings during dialogs)
+    this._resetCheatSelections();
+
+    // Run the full normal shot-end processing
+    await this.handleShotEnd(physics);
+
+    // After processing, show Finish Shot button again for next shot
+    this._updateCheatFinishButton(physics);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** @deprecated HTML button — now replaced by Pixi right panel */
   _injectRulesButton(container) {
-    if (document.getElementById('rules-help-btn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'rules-help-btn';
-    btn.className = 'hud-rules-btn';
-    btn.title = 'Rules Reference';
-    btn.textContent = '?';
-    btn.addEventListener('click', () => this.showRulesModal());
-    container.appendChild(btn);
+    // No-op: button is now part of the Pixi canvas via renderer.drawRightPanel()
   }
 
   showRulesModal() {

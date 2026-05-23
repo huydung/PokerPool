@@ -262,10 +262,13 @@ export class PhysicsEngine {
       Matter.Body.setAngularVelocity(this.cueBall, 0);
     }
 
-    // Limit maximum speed of dynamic bodies to avoid tunneling errors
+    // Limit maximum speed and snap near-zero velocities to exactly zero.
+    // The snap prevents balls from creeping slowly into pockets after the game
+    // has declared them "stopped" — a common source of phantom pocket events.
     const maxSpeed = this.config.ball.maxSpeed;
+    const snapThreshold = 0.1; // px/frame below which we hard-zero velocity
     const allBodies = Matter.Composite.allBodies(this.world);
-    
+
     allBodies.forEach(body => {
       if (!body.isStatic) {
         const speed = Matter.Body.getSpeed(body);
@@ -275,6 +278,11 @@ export class PhysicsEngine {
             x: body.velocity.x * ratio,
             y: body.velocity.y * ratio
           });
+        } else if (speed > 0 && speed < snapThreshold) {
+          // Snap micro-velocity to zero so balls cannot creep into pockets
+          // after the turn has been declared over.
+          Matter.Body.setVelocity(body, { x: 0, y: 0 });
+          Matter.Body.setAngularVelocity(body, 0);
         }
       }
     });
@@ -286,12 +294,15 @@ export class PhysicsEngine {
    */
   areAllBallsStopped() {
     if (!this.cueBall) return false;
+    // Use 0.1 threshold (matches the snap-to-zero in update) so balls that
+    // have not yet been snapped are not considered "stopped" — preventing the
+    // game loop from declaring a shot over while a ball is still creeping.
     const cueSpeed = Matter.Body.getSpeed(this.cueBall);
-    if (cueSpeed > 0.05) return false;
+    if (cueSpeed > 0.1) return false;
 
     for (let i = 0; i < this.targetBalls.length; i++) {
       const ballSpeed = Matter.Body.getSpeed(this.targetBalls[i]);
-      if (ballSpeed > 0.05) return false;
+      if (ballSpeed > 0.1) return false;
     }
     return true;
   }

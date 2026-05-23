@@ -48,6 +48,16 @@ export class AimingControls {
      */
     this.onShotFired = null;
 
+    // ── Cheat mode click callbacks ─────────────────────────────────────────
+    /** Set to true externally when cheat mode is active */
+    this.cheatEnabled = false;
+    /** Array of Matter.js pocket bodies — set from physics.pockets in main.js */
+    this.physicsPockets = [];
+    /** @type {function(Matter.Body)|null} Called when a ball is clicked in cheat mode */
+    this.onCheatBallClick = null;
+    /** @type {function(number)|null} Called when a pocket is clicked in cheat mode (pocketId) */
+    this.onCheatPocketClick = null;
+
     this.initEvents();
   }
 
@@ -301,6 +311,12 @@ export class AimingControls {
       if (!allStopped) return;
       if (y < 100) return; // ignore HUD strip
 
+      // ── Cheat mode: ball / pocket click selection ──────────────────────────
+      if (this.cheatEnabled) {
+        this._handleCheatClick(x, y);
+        return; // cheat click consumes the event; no aiming or slider
+      }
+
       // ── Power slider ────────────────────────────────────────────────────────
       if (this._isInsideSlider(x, y)) {
         this.isDraggingSlider = true;
@@ -440,6 +456,51 @@ export class AimingControls {
     const buf = s.touchBuffer ?? 20;
     return x >= s.x - buf && x <= s.x + s.width + buf &&
            y >= s.y - buf && y <= s.y + s.height + buf;
+  }
+
+  /**
+   * Handles a canvas click in cheat mode.
+   * Hit-tests against all live balls and all pocket bodies.
+   * Fires onCheatBallClick or onCheatPocketClick as appropriate.
+   * @param {number} x Canvas X coordinate
+   * @param {number} y Canvas Y coordinate
+   */
+  _handleCheatClick(x, y) {
+    const ballRadius = this.config.ball.radius;
+    const pocketRadius = this.config.pocket.radius;
+
+    // ── Check cue ball ─────────────────────────────────────────────────────
+    const cueBall = this.physics.cueBall;
+    if (cueBall) {
+      const dx = x - cueBall.position.x;
+      const dy = y - cueBall.position.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= ballRadius + 6) {
+        if (this.onCheatBallClick) this.onCheatBallClick(cueBall);
+        return;
+      }
+    }
+
+    // ── Check target balls ─────────────────────────────────────────────────
+    const balls = this.physics.targetBalls || [];
+    for (const ball of balls) {
+      const dx = x - ball.position.x;
+      const dy = y - ball.position.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= ballRadius + 6) {
+        if (this.onCheatBallClick) this.onCheatBallClick(ball);
+        return;
+      }
+    }
+
+    // ── Check pockets ──────────────────────────────────────────────────────
+    for (const pocket of this.physicsPockets) {
+      const dx = x - pocket.position.x;
+      const dy = y - pocket.position.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= pocketRadius + 8) {
+        const pocketId = pocket.plugin?.pocketId ?? -1;
+        if (pocketId >= 0 && this.onCheatPocketClick) this.onCheatPocketClick(pocketId);
+        return;
+      }
+    }
   }
 
   /**

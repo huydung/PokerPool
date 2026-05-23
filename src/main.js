@@ -26,14 +26,30 @@ async function initSandbox() {
   const renderer = new CanvasRenderer(container, CONFIG);
   await renderer.init();
 
-  // Set up pocket overlap hook to sync physics with visual views and game state rules
-  physics.onPocketOverlap = (ball, pocket) => {
-    const pocketId = pocket.plugin?.pocketId !== undefined ? pocket.plugin.pocketId : -1;
-    game.handlePocketOverlap(ball, pocketId);
+  // Shared pocket-overlap executor — used by normal physics events AND cheat shots.
+  // Returns true when the event was accepted (shot in progress), false for phantom events.
+  // Phantom events (ball crept in after shot ended) are respawned immediately so the
+  // ball stays in play rather than silently disappearing.
+  const executePocketOverlap = (ball, pocketId) => {
+    const accepted = game.handlePocketOverlap(ball, pocketId);
+    if (!accepted && ball.label !== 'cue_ball') {
+      // Phantom pocket: ball was still creeping after the shot window closed.
+      // Respawn it to the nearest free spot so it stays on the table.
+      console.log(`[MAIN] Phantom pocket for ball ${ball.plugin?.ballId} — respawning instead of removing`);
+      physics.respawnBall(ball);
+      renderer.setBallVisibility(ball.id, true);
+      return;
+    }
     physics.handlePocketOverlap(ball);
     if (ball.label !== 'cue_ball') {
       renderer.setBallVisibility(ball.id, false);
     }
+  };
+
+  // Set up pocket overlap hook to sync physics with visual views and game state rules
+  physics.onPocketOverlap = (ball, pocket) => {
+    const pocketId = pocket.plugin?.pocketId !== undefined ? pocket.plugin.pocketId : -1;
+    executePocketOverlap(ball, pocketId);
   };
 
   // 3. Create the card-overlay ball visual representations
@@ -49,6 +65,20 @@ async function initSandbox() {
   // Wire shot-fired callback: handleShotStart clears per-shot registers BEFORE
   // applyCueStroke so no pocket event from the first physics frame is lost.
   controls.onShotFired = () => game.handleShotStart();
+
+  // ── Cheat mode wiring ────────────────────────────────────────────────────
+  // Give controls access to pocket bodies for cheat click hit-testing
+  controls.physicsPockets = physics.pockets;
+
+  // Cheat ball/pocket click callbacks → game state
+  controls.onCheatBallClick   = (ball)     => game.handleCheatBallClick(ball);
+  controls.onCheatPocketClick = (pocketId) => game.handleCheatPocketClick(pocketId);
+
+  // Renderer cheat toggle → game + controls
+  renderer.onCheatToggle = (enabled) => game.setCheatEnabled(enabled, physics);
+
+  // Renderer Finish Shot button → execute the cheat shot
+  renderer.onCheatFinishShot = () => game.executeCheatShot(physics, executePocketOverlap);
 
   // Start the match by triggering the virtual coin toss
   await game.startMatch(controls, renderer);
@@ -70,6 +100,9 @@ async function initSandbox() {
 
     // Step B: Synchronize Pixi graphics to Matter.js coordinates
     renderer.syncPositions(physics.cueBall, physics.targetBalls);
+
+    // Step B2: Keep cheat-mode selection rings in sync with ball positions
+    renderer.syncCheatOverlays();
 
     // Step C: Calculate and render the aiming laser line & ghost ball
     const aimData = controls.getAimData();

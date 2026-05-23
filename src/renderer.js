@@ -56,6 +56,25 @@ export class CanvasRenderer {
     this.uiContainer = new Container();
     this._bihConfirmButton = null;
 
+    // ── Cheat overlay container: selection rings drawn above balls, below HUD ──
+    this._cheatOverlayContainer = new Container();
+    this._cheatBallRings = new Map();   // bodyId → Graphics ring
+    this._cheatPocketRings = [];        // index-matched Graphics rings per pocket
+
+    // ── Right-side icon panel ──────────────────────────────────────────────────
+    this.rightPanelContainer = new Container();
+    this._cheatEnabled = false;
+    this._cheatFinishBtn = null;        // Pixi "Finish Shot" button container
+    this._cheatTogglePill = null;       // The toggle pill graphics object
+
+    // Callbacks wired from main.js / game.js
+    /** @type {function|null} Called when the ? (rules) icon is clicked */
+    this.onRulesRequest = null;
+    /** @type {function(boolean)|null} Called when the cheat toggle changes */
+    this.onCheatToggle = null;
+    /** @type {function|null} Called when the Finish Shot button is pressed */
+    this.onCheatFinishShot = null;
+
     // Active Player Turn Name tracking
     this.player1Name = this.config.rules?.player1Name || 'Alice';
     this.player2Name = this.config.rules?.player2Name || 'Bob';
@@ -93,14 +112,17 @@ export class CanvasRenderer {
     this.app.stage.addChild(this.tableContainer);
     this.app.stage.addChild(this.aimContainer);
     this.app.stage.addChild(this.ballContainer);
+    this.app.stage.addChild(this._cheatOverlayContainer); // cheat selection rings (above balls)
     this.app.stage.addChild(this.hudContainer);
     this.app.stage.addChild(this.sliderGraphics); // Top-level glassmorphic slider overlay
-    this.app.stage.addChild(this.uiContainer);   // Floating Pixi UI (BIH confirm button, etc.)
+    this.app.stage.addChild(this.uiContainer);    // Floating Pixi UI (BIH confirm button, etc.)
+    this.app.stage.addChild(this.rightPanelContainer); // always-on-top right icon panel
 
     this.aimContainer.addChild(this.aimGraphics);
 
     this.drawTableLayout();
     this.drawHUDLayout();
+    this.drawRightPanel();
   }
 
   /**
@@ -695,7 +717,7 @@ export class CanvasRenderer {
       bg.roundRect(-w / 2, -h / 2, w, h, h / 2);
       bg.fill({ color: valid ? 0x00c853 : 0x880000, alpha: valid ? 0.95 : 0.85 });
       bg.stroke({ color: valid ? 0x00e676 : 0xff5252, width: 1.5, alpha: 0.9 });
-      text.text = valid ? label : '⚠ OVERLAPPING — DRAG CUE BALL';
+      text.text = valid ? label : '⚠ OVERLAPPING';
       text.style.fill = valid ? 0x001a00 : 0xffcccc;
       btn.cursor = valid ? 'pointer' : 'not-allowed';
       btn.alpha = valid ? 1.0 : 0.75;
@@ -735,6 +757,310 @@ export class CanvasRenderer {
       this._bihConfirmButton = null;
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RIGHT PANEL — rules, credits, cheat toggle
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Draws the permanent right-side icon column:
+   *   1. "?" → How to Play (rules modal)
+   *   2. "i" → Credits (opens huydung.com)
+   *   3. CHEAT toggle pill
+   *
+   * The panel fills the narrow strip between the table's right rail and the
+   * canvas edge (≈ 960–1024 px).
+   */
+  drawRightPanel() {
+    const { yCenter, height } = this.config.table;
+    // Fix panel at a constant position — 56px strip on the right edge.
+    // This is intentionally NOT derived from xCenter so the panel stays put
+    // regardless of table positioning, and blends with the canvas background.
+    const panelX = this.config.canvas.width - 56;
+    const cx = panelX + 28;   // horizontal centre of the 56px strip
+    const yTop = yCenter - height / 2; // table top y ≈ 130
+
+    const rp = this.rightPanelContainer;
+    // NO background rectangle — panel blends with the canvas background colour.
+
+    // ── Helper: circular icon button ──────────────────────────────────────
+    const makeIcon = (symbol, yPos, borderColor, onClick) => {
+      const btn = new Container();
+      btn.eventMode = 'static';
+      btn.cursor = 'pointer';
+      btn.x = cx;
+      btn.y = yPos;
+
+      const circ = new Graphics();
+      circ.circle(0, 0, 16);
+      circ.fill({ color: 0x0d1b2e });
+      circ.stroke({ color: borderColor, width: 1.5 });
+      btn.addChild(circ);
+
+      const label = new Text({
+        text: symbol,
+        style: new TextStyle({
+          fontFamily: 'Inter, Arial, sans-serif',
+          fontSize: 14,
+          fontWeight: '900',
+          fill: borderColor,
+        })
+      });
+      label.anchor.set(0.5);
+      btn.addChild(label);
+
+      btn.on('pointerover', () => { circ.tint = 0xdddddd; });
+      btn.on('pointerout',  () => { circ.tint = 0xffffff; });
+      btn.on('pointerdown', (e) => { e.stopPropagation(); onClick(); });
+      rp.addChild(btn);
+      return btn;
+    };
+
+    // "?" — How to Play
+    makeIcon('?', yTop + 20, 0x00e5ff, () => {
+      if (this.onRulesRequest) this.onRulesRequest();
+    });
+
+    // "i" — Credits
+    makeIcon('i', yTop + 62, 0x7ecaff, () => {
+      window.open('https://huydung.com', '_blank');
+    });
+
+    // ── Thin separator ────────────────────────────────────────────────────
+    const sep = new Graphics();
+    sep.moveTo(panelX + 6, yTop + 97).lineTo(this.config.canvas.width - 6, yTop + 97);
+    sep.stroke({ color: 0x1e3a5f, width: 1 });
+    rp.addChild(sep);
+
+    // ── CHEAT toggle pill ─────────────────────────────────────────────────
+    const toggleY = yTop + 120;
+
+    // Label above
+    const cheatLabel = new Text({
+      text: 'CHEAT',
+      style: new TextStyle({
+        fontFamily: 'Inter, Arial, sans-serif',
+        fontSize: 9,
+        fontWeight: '700',
+        fill: 0x6b8cae,
+        letterSpacing: 1
+      })
+    });
+    cheatLabel.anchor.set(0.5);
+    cheatLabel.x = cx;
+    cheatLabel.y = toggleY - 14;
+    rp.addChild(cheatLabel);
+
+    // Pill container
+    const toggleBtn = new Container();
+    toggleBtn.eventMode = 'static';
+    toggleBtn.cursor = 'pointer';
+    toggleBtn.x = cx;
+    toggleBtn.y = toggleY;
+
+    const pill = new Graphics();
+    this._cheatTogglePill = pill;
+    this._redrawCheatToggle(false); // initial off state
+    toggleBtn.addChild(pill);
+
+    // State label inside pill
+    const stateText = new Text({
+      text: 'OFF',
+      style: new TextStyle({
+        fontFamily: 'Inter, Arial, sans-serif',
+        fontSize: 8,
+        fontWeight: '700',
+        fill: 0x6b8cae,
+      })
+    });
+    stateText.anchor.set(0.5);
+    stateText.x = 0;
+    stateText.y = 0;
+    toggleBtn.addChild(stateText);
+    this._cheatToggleLabel = stateText;
+
+    toggleBtn.on('pointerdown', (e) => {
+      e.stopPropagation();
+      this._cheatEnabled = !this._cheatEnabled;
+      this._redrawCheatToggle(this._cheatEnabled);
+      stateText.text = this._cheatEnabled ? 'ON' : 'OFF';
+      stateText.style.fill = this._cheatEnabled ? 0x001a00 : 0x6b8cae;
+      console.log(`[RENDERER] Cheat toggle clicked → ${this._cheatEnabled ? 'ON' : 'OFF'} (onCheatToggle wired=${!!this.onCheatToggle})`);
+      if (this.onCheatToggle) {
+        this.onCheatToggle(this._cheatEnabled);
+      } else {
+        console.warn('[RENDERER] onCheatToggle callback not wired — cheat state not propagated to game engine');
+      }
+    });
+    rp.addChild(toggleBtn);
+    console.log(`[RENDERER] Right panel drawn: panelX=${panelX} cx=${cx} yTop=${yTop}`);
+  }
+
+  /**
+   * Redraws the cheat toggle pill in on/off state.
+   * @param {boolean} enabled
+   */
+  _redrawCheatToggle(enabled) {
+    const p = this._cheatTogglePill;
+    if (!p) return;
+    const w = 38, h = 16;
+    p.clear();
+    p.roundRect(-w / 2, -h / 2, w, h, h / 2);
+    p.fill({ color: enabled ? 0x00c853 : 0x1a2e44 });
+    p.stroke({ color: enabled ? 0x00e676 : 0x2a4460, width: 1.5 });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CHEAT — Finish Shot button
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Shows or hides the amber "FINISH SHOT" button in the HUD strip.
+   * Positioned in the same slot as the BIH confirm button (y=78) but uses
+   * amber styling so players immediately recognise it as a cheat action.
+   */
+  setCheatFinishButton(visible) {
+    if (!visible) {
+      if (this._cheatFinishBtn) {
+        this.uiContainer.removeChild(this._cheatFinishBtn);
+        this._cheatFinishBtn.destroy({ children: true });
+        this._cheatFinishBtn = null;
+      }
+      return;
+    }
+    if (this._cheatFinishBtn) return; // already shown
+
+    const btn = new Container();
+    btn.eventMode = 'static';
+    btn.cursor = 'pointer';
+    btn.x = this.config.canvas.width / 2;
+    btn.y = 78;
+
+    const bg = new Graphics();
+    const w = 200, h = 20;
+    bg.roundRect(-w / 2, -h / 2, w, h, h / 2);
+    bg.fill({ color: 0xff8f00, alpha: 0.95 });
+    bg.stroke({ color: 0xffc107, width: 1.5, alpha: 0.9 });
+    btn.addChild(bg);
+
+    const lbl = new Text({
+      text: '⚡ FINISH SHOT',
+      style: new TextStyle({
+        fontFamily: 'Inter, Arial, sans-serif',
+        fontSize: 11,
+        fontWeight: '900',
+        fill: 0x1a0a00,
+        letterSpacing: 1.5
+      })
+    });
+    lbl.anchor.set(0.5);
+    btn.addChild(lbl);
+
+    btn.on('pointerover', () => { btn.alpha = 0.8; });
+    btn.on('pointerout',  () => { btn.alpha = 1.0; });
+    btn.on('pointerdown', (e) => {
+      e.stopPropagation();
+      if (this.onCheatFinishShot) this.onCheatFinishShot();
+    });
+
+    this._cheatFinishBtn = btn;
+    this.uiContainer.addChild(btn);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CHEAT — ball & pocket selection overlays
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Adds or removes a yellow selection ring around a ball in cheat mode.
+   * @param {number} bodyId  Matter.js body ID
+   * @param {boolean} selected
+   */
+  setCheatBallSelected(bodyId, selected) {
+    if (!selected) {
+      const ring = this._cheatBallRings.get(bodyId);
+      if (ring) {
+        this._cheatOverlayContainer.removeChild(ring);
+        ring.destroy();
+        this._cheatBallRings.delete(bodyId);
+      }
+      return;
+    }
+    if (this._cheatBallRings.has(bodyId)) return; // already shown
+
+    const view = this.ballViews.get(bodyId);
+    if (!view) return;
+
+    const ring = new Graphics();
+    const r = this.config.ball.radius + 4;
+    ring.circle(0, 0, r);
+    ring.stroke({ color: 0xffeb3b, width: 2.5, alpha: 0.9 });
+    ring.fill({ color: 0xffeb3b, alpha: 0.12 });
+    ring.x = view.x;
+    ring.y = view.y;
+    this._cheatBallRings.set(bodyId, ring);
+    this._cheatOverlayContainer.addChild(ring);
+  }
+
+  /**
+   * Adds or removes a selection glow on a pocket in cheat mode.
+   * @param {number} pocketIdx  0-5 pocket index
+   * @param {boolean} selected
+   */
+  setCheatPocketSelected(pocketIdx, selected) {
+    // Remove existing overlay if any
+    if (this._cheatPocketRings[pocketIdx]) {
+      const existing = this._cheatPocketRings[pocketIdx];
+      this._cheatOverlayContainer.removeChild(existing);
+      existing.destroy();
+      this._cheatPocketRings[pocketIdx] = null;
+    }
+    if (!selected) return;
+
+    const pg = this.pocketGraphics[pocketIdx];
+    if (!pg) return;
+
+    const ring = new Graphics();
+    ring.circle(0, 0, this.config.pocket.radius + 5);
+    ring.stroke({ color: 0xffeb3b, width: 3, alpha: 1.0 });
+    ring.fill({ color: 0xffeb3b, alpha: 0.2 });
+    ring.x = pg.container.x;
+    ring.y = pg.container.y;
+    this._cheatPocketRings[pocketIdx] = ring;
+    this._cheatOverlayContainer.addChild(ring);
+  }
+
+  /**
+   * Clears all cheat selection rings (balls and pockets).
+   */
+  clearCheatSelections() {
+    this._cheatBallRings.forEach((ring) => {
+      this._cheatOverlayContainer.removeChild(ring);
+      ring.destroy();
+    });
+    this._cheatBallRings.clear();
+
+    this._cheatPocketRings.forEach((ring) => {
+      if (ring) {
+        this._cheatOverlayContainer.removeChild(ring);
+        ring.destroy();
+      }
+    });
+    this._cheatPocketRings = [];
+  }
+
+  /**
+   * Syncs cheat ball ring positions to current ball positions each frame.
+   * Called from main.js ticker after syncPositions.
+   */
+  syncCheatOverlays() {
+    this._cheatBallRings.forEach((ring, bodyId) => {
+      const view = this.ballViews.get(bodyId);
+      if (view) { ring.x = view.x; ring.y = view.y; }
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   /**
    * Appends a full-width coloured overlay div that sweeps across the HUD

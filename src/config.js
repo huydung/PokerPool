@@ -24,8 +24,8 @@ export const CONFIG = {
     width: 800,
     /** @type {number} Height of the play area inside the cushions (2:1 ratio) */
     height: 400,
-    /** @type {number} Center coordinate along X-axis (shifted right to balance the left slider) */
-    xCenter: 540,
+    /** @type {number} Center coordinate along X-axis (true canvas centre = 1024/2, balances slider+right panel) */
+    xCenter: 512,
     /** @type {number} Center coordinate along Y-axis (vertically centred in the space below the HUD) */
     yCenter: 330,
     /** @type {number} Thickness of the rails in pixels */
@@ -194,15 +194,15 @@ export const CONFIG = {
     minBreakCushionContacts: 4,
     /** @type {Array<{x: number, y: number}>} 9-point respawn matrix coordinates */
     respawnMatrix: [
-      { x: 340, y: 230 },
-      { x: 340, y: 330 },
-      { x: 340, y: 430 },
-      { x: 540, y: 255 },
-      { x: 540, y: 330 },
-      { x: 540, y: 405 },
-      { x: 740, y: 230 },
-      { x: 740, y: 330 },
-      { x: 740, y: 430 }
+      { x: 312, y: 230 },
+      { x: 312, y: 330 },
+      { x: 312, y: 430 },
+      { x: 512, y: 255 },
+      { x: 512, y: 330 },
+      { x: 512, y: 405 },
+      { x: 712, y: 230 },
+      { x: 712, y: 330 },
+      { x: 712, y: 430 }
     ]
   }
 };
