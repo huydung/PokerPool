@@ -43,14 +43,18 @@ export class CanvasRenderer {
     this.p2HUDContainer = null;
     this.p1Tokens = [];
     this.p2Tokens = [];
-    this.p1HandLabel = null;
-    this.p2HandLabel = null;
+    // this.p1HandLabel = null;
+    // this.p2HandLabel = null;
 
     // Laser overlay graphics
     this.aimGraphics = new Graphics();
 
     // Slider overlay graphics
     this.sliderGraphics = new Graphics();
+
+    // Top-level UI container for Pixi-native overlays (BIH button, etc.)
+    this.uiContainer = new Container();
+    this._bihConfirmButton = null;
 
     // Active Player Turn Name tracking
     this.player1Name = this.config.rules?.player1Name || 'Alice';
@@ -91,6 +95,7 @@ export class CanvasRenderer {
     this.app.stage.addChild(this.ballContainer);
     this.app.stage.addChild(this.hudContainer);
     this.app.stage.addChild(this.sliderGraphics); // Top-level glassmorphic slider overlay
+    this.app.stage.addChild(this.uiContainer);   // Floating Pixi UI (BIH confirm button, etc.)
 
     this.aimContainer.addChild(this.aimGraphics);
 
@@ -221,13 +226,33 @@ export class CanvasRenderer {
       this.pocketGraphics.push({ container: pocketView, glow, rim, suitContainer, type: pos.type });
       this.tableContainer.addChild(pocketView);
     });
+
+    // ── Cover strips ───────────────────────────────────────────────────────────
+    // Draw background-colour rectangles over the four outer strips so that any
+    // pocket circle pixels that extend beyond the outer rail are hidden cleanly.
+    // These sit above the pocket graphics in the tableContainer draw order, but
+    // below every other container (balls, HUD, slider) which are added to stage later.
+    const bgColor = 0x0e1726; // must match app backgroundColor
+    const canvasW = this.config.canvas.width;
+    const canvasH = this.config.canvas.height;
+    const outerLeft   = xCenter - hw - rw;
+    const outerTop    = yCenter - hh - rw;
+    const outerRight  = xCenter + hw + rw;
+    const outerBottom = yCenter + hh + rw;
+
+    const cover = new Graphics();
+    cover.rect(0, 0, canvasW, outerTop).fill({ color: bgColor });                              // top strip
+    cover.rect(0, outerBottom, canvasW, canvasH - outerBottom).fill({ color: bgColor });       // bottom strip
+    cover.rect(0, outerTop, outerLeft, outerBottom - outerTop).fill({ color: bgColor });       // left strip
+    cover.rect(outerRight, outerTop, canvasW - outerRight, outerBottom - outerTop).fill({ color: bgColor }); // right strip
+    this.tableContainer.addChild(cover);
   }
 
   /**
    * Draws the top HUD interface displaying scores, hands, and current turn indicators.
    */
   drawHUDLayout() {
-    const hudHeight = 100;
+    const hudHeight = 90;
     
     // Draw background glassmorphism panel
     const bg = new Graphics();
@@ -239,6 +264,7 @@ export class CanvasRenderer {
     this.p1GradientSprite = new Sprite(this.createGradientTexture(0x00e5ff, true));
     this.p1GradientSprite.x = 0;
     this.p1GradientSprite.y = 0;
+    this.p1GradientSprite.height = hudHeight; // clamp to HUD height — avoids bleeding below HUD
     this.p1GradientSprite.alpha = 0.35; // Premium glowing visual style
     this.p1GradientSprite.visible = false;
     this.hudContainer.addChild(this.p1GradientSprite);
@@ -246,11 +272,21 @@ export class CanvasRenderer {
     this.p2GradientSprite = new Sprite(this.createGradientTexture(0xe040fb, false));
     this.p2GradientSprite.x = 512;
     this.p2GradientSprite.y = 0;
+    this.p2GradientSprite.height = hudHeight; // clamp to HUD height — avoids bleeding below HUD
     this.p2GradientSprite.alpha = 0.35; // Premium glowing visual style
     this.p2GradientSprite.visible = false;
     this.hudContainer.addChild(this.p2GradientSprite);
 
-    const titleStyle = new TextStyle({
+    // Separate TextStyle instances per player so setActivePlayer() can colorize
+    // each title independently without cross-contaminating the other.
+    const p1TitleStyle = new TextStyle({
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: 15,
+      fontWeight: 'bold',
+      fill: 0xffffff,
+      letterSpacing: 2
+    });
+    const p2TitleStyle = new TextStyle({
       fontFamily: 'Inter, Arial, sans-serif',
       fontSize: 15,
       fontWeight: 'bold',
@@ -270,7 +306,7 @@ export class CanvasRenderer {
     p1Container.y = 8;
     this.p1HUDContainer = p1Container;
 
-    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'ALICE'}`, style: titleStyle });
+    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'ALICE'}`, style: p1TitleStyle });
     p1Title.x = 0;
     p1Title.y = 0;
     p1Container.addChild(p1Title);
@@ -292,7 +328,7 @@ export class CanvasRenderer {
     // Render 5 empty card slot outlines for Player 1
     for (let i = 0; i < 5; i++) {
       const cardSlot = new Graphics();
-      cardSlot.roundRect(i * 40, 42, 32, 46, 4);
+      cardSlot.roundRect(i * 40, 28, 32, 46, 4);
       cardSlot.fill({ color: 0x0b0f19, alpha: 0.6 });
       cardSlot.stroke({ color: 0x213359, width: 1.5 });
       p1Container.addChild(cardSlot);
@@ -301,22 +337,22 @@ export class CanvasRenderer {
 
     this.p1CardsContainer = new Container();
     this.p1CardsContainer.x = 0;
-    this.p1CardsContainer.y = 42;
+    this.p1CardsContainer.y = 28; // align with slot outlines (drawn at y=28)
     p1Container.addChild(this.p1CardsContainer);
 
     // Hand label (real-time poker hand rank display)
-    const p1LabelStyle = new TextStyle({
-      fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 10,
-      fontWeight: 'bold',
-      fill: 0x00e5ff,
-      alpha: 0.9
-    });
-    const p1HandLabel = new Text({ text: '', style: p1LabelStyle });
-    p1HandLabel.x = 0;
-    p1HandLabel.y = 90;
-    p1Container.addChild(p1HandLabel);
-    this.p1HandLabel = p1HandLabel;
+    // const p1LabelStyle = new TextStyle({
+    //   fontFamily: 'Inter, Arial, sans-serif',
+    //   fontSize: 10,
+    //   fontWeight: 'bold',
+    //   fill: 0x00e5ff,
+    //   alpha: 0.9
+    // });
+    // const p1HandLabel = new Text({ text: '', style: p1LabelStyle });
+    // p1HandLabel.x = 0;
+    // p1HandLabel.y = 72;
+    // p1Container.addChild(p1HandLabel);
+    // this.p1HandLabel = p1HandLabel;
 
     this.hudContainer.addChild(p1Container);
 
@@ -326,7 +362,7 @@ export class CanvasRenderer {
     p2Container.y = 8;
     this.p2HUDContainer = p2Container;
 
-    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'BOB'}`, style: titleStyle });
+    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'BOB'}`, style: p2TitleStyle });
     p2Title.x = 0;
     p2Title.y = 0;
     p2Container.addChild(p2Title);
@@ -348,7 +384,7 @@ export class CanvasRenderer {
     // Render 5 empty card slot outlines for Player 2
     for (let i = 0; i < 5; i++) {
       const cardSlot = new Graphics();
-      cardSlot.roundRect(i * 40, 42, 32, 46, 4);
+      cardSlot.roundRect(i * 40, 28, 32, 46, 4);
       cardSlot.fill({ color: 0x0b0f19, alpha: 0.6 });
       cardSlot.stroke({ color: 0x213359, width: 1.5 });
       p2Container.addChild(cardSlot);
@@ -357,29 +393,29 @@ export class CanvasRenderer {
 
     this.p2CardsContainer = new Container();
     this.p2CardsContainer.x = 0;
-    this.p2CardsContainer.y = 42;
+    this.p2CardsContainer.y = 28; // align with slot outlines (drawn at y=28)
     p2Container.addChild(this.p2CardsContainer);
 
     // Hand label (real-time poker hand rank display)
-    const p2LabelStyle = new TextStyle({
-      fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 10,
-      fontWeight: 'bold',
-      fill: 0xe040fb,
-      alpha: 0.9
-    });
-    const p2HandLabel = new Text({ text: '', style: p2LabelStyle });
-    p2HandLabel.x = 0;
-    p2HandLabel.y = 90;
-    p2Container.addChild(p2HandLabel);
-    this.p2HandLabel = p2HandLabel;
+    // const p2LabelStyle = new TextStyle({
+    //   fontFamily: 'Inter, Arial, sans-serif',
+    //   fontSize: 10,
+    //   fontWeight: 'bold',
+    //   fill: 0xe040fb,
+    //   alpha: 0.9
+    // });
+    // const p2HandLabel = new Text({ text: '', style: p2LabelStyle });
+    // p2HandLabel.x = 0;
+    // p2HandLabel.y = 72;
+    // p2Container.addChild(p2HandLabel);
+    // this.p2HandLabel = p2HandLabel;
 
     this.hudContainer.addChild(p2Container);
 
     // 3. Center Status Panel (Beautiful modern reactive badge)
     const centerContainer = new Container();
     centerContainer.x = 392; // Centered exactly at (1024 - 240) / 2
-    centerContainer.y = 25; // Adjusted vertically for perfect centering
+    centerContainer.y = 12; // Adjusted vertically for perfect centering
 
     const centerBadgeBg = new Graphics();
     centerBadgeBg.roundRect(0, 0, 240, 50, 25); // Sleek glassmorphic pill shape
@@ -404,6 +440,89 @@ export class CanvasRenderer {
     centerContainer.addChild(this.activePlayerText);
 
     this.hudContainer.addChild(centerContainer);
+  }
+
+  /**
+   * Draws a vector suit icon directly onto a Pixi Graphics object.
+   * Every suit uses the same overall bounding box (size × size) so all four symbols
+   * render at exactly the same visual weight — no font-metric inconsistencies.
+   *
+   * @param {Graphics} g      Target Pixi Graphics to draw into
+   * @param {string}   suit   'S' | 'H' | 'D' | 'C'
+   * @param {number}   cx     Center X inside g's local coordinate space
+   * @param {number}   cy     Center Y inside g's local coordinate space
+   * @param {number}   size   Bounding-box side length in pixels
+   * @param {number}   color  Hex fill colour (0xRRGGBB)
+   */
+  _drawSuitIcon(g, suit, cx, cy, size, color) {
+    const s = size / 2; // half-size convenience
+
+    if (suit === 'D') {
+      // Diamond — clean 4-point rhombus
+      g.moveTo(cx, cy - s)
+        .lineTo(cx + s * 0.72, cy)
+        .lineTo(cx, cy + s)
+        .lineTo(cx - s * 0.72, cy)
+        .closePath()
+        .fill({ color });
+
+    } else if (suit === 'H') {
+      // Heart — two circular lobes + a downward-pointing triangle
+      const lr = s * 0.55;
+      g.circle(cx - s * 0.30, cy - s * 0.15, lr).fill({ color });
+      g.circle(cx + s * 0.30, cy - s * 0.15, lr).fill({ color });
+      g.moveTo(cx - s * 0.90, cy - s * 0.10)
+        .lineTo(cx + s * 0.90, cy - s * 0.10)
+        .lineTo(cx, cy + s)
+        .closePath()
+        .fill({ color });
+
+    } else if (suit === 'S') {
+      // Spade — upward triangle + two lower lobes + a short stem + base bar
+      g.moveTo(cx, cy - s)
+        .lineTo(cx + s * 0.90, cy + s * 0.25)
+        .lineTo(cx - s * 0.90, cy + s * 0.25)
+        .closePath()
+        .fill({ color });
+      const lr = s * 0.50;
+      g.circle(cx - s * 0.35, cy + s * 0.12, lr).fill({ color });
+      g.circle(cx + s * 0.35, cy + s * 0.12, lr).fill({ color });
+      // Stem
+      g.moveTo(cx - s * 0.20, cy + s * 0.35)
+        .lineTo(cx + s * 0.20, cy + s * 0.35)
+        .lineTo(cx + s * 0.20, cy + s * 0.75)
+        .lineTo(cx - s * 0.20, cy + s * 0.75)
+        .closePath()
+        .fill({ color });
+      // Base bar
+      g.moveTo(cx - s * 0.55, cy + s)
+        .lineTo(cx + s * 0.55, cy + s)
+        .lineTo(cx + s * 0.25, cy + s * 0.72)
+        .lineTo(cx - s * 0.25, cy + s * 0.72)
+        .closePath()
+        .fill({ color });
+
+    } else if (suit === 'C') {
+      // Club — three equal circles + stem + base bar
+      const cr = s * 0.44;
+      g.circle(cx,              cy - s * 0.30, cr).fill({ color });
+      g.circle(cx - s * 0.46,  cy + s * 0.22, cr).fill({ color });
+      g.circle(cx + s * 0.46,  cy + s * 0.22, cr).fill({ color });
+      // Stem
+      g.moveTo(cx - s * 0.20, cy + s * 0.38)
+        .lineTo(cx + s * 0.20, cy + s * 0.38)
+        .lineTo(cx + s * 0.20, cy + s * 0.72)
+        .lineTo(cx - s * 0.20, cy + s * 0.72)
+        .closePath()
+        .fill({ color });
+      // Base bar
+      g.moveTo(cx - s * 0.55, cy + s)
+        .lineTo(cx + s * 0.55, cy + s)
+        .lineTo(cx + s * 0.25, cy + s * 0.70)
+        .lineTo(cx - s * 0.25, cy + s * 0.70)
+        .closePath()
+        .fill({ color });
+    }
   }
 
   /**
@@ -530,6 +649,84 @@ export class CanvasRenderer {
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // PIXI-NATIVE BALL-IN-HAND CONFIRM BUTTON
+  // Rendered inside the canvas so it scales correctly on every window size.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Shows the "Confirm Position" button as a Pixi interactive element placed
+   * in the gap between the HUD and the table top.
+   * @param {string}   label      Button text (e.g. "CONFIRM BREAK POSITION")
+   * @param {Function} onConfirm  Callback fired when the button is pressed
+   */
+  showBallInHandConfirmButton(label, onConfirm) {
+    this.hideBallInHandConfirmButton(); // remove any stale instance
+
+    const btn = new Container();
+    btn.eventMode = 'static';
+    btn.cursor = 'pointer';
+
+    const bg = new Graphics();
+    btn.addChild(bg);
+
+    const style = new TextStyle({
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: 11,
+      fontWeight: '900',
+      fill: 0x001a00,
+      letterSpacing: 1.5
+    });
+    const text = new Text({ text: label, style });
+    text.anchor.set(0.5);
+    btn.addChild(text);
+
+    // Sits inside the HUD strip, centred below the active-player badge.
+    // Badge occupies y=12→62; this button fills the remaining 62→85 band.
+    btn.x = this.config.canvas.width / 2;
+    btn.y = 78; // centre of the 62–85 band ≈ 73.5, shifted down ~5px per UX feedback
+
+    // Draws button in valid (green) or invalid (red) state
+    const drawState = (valid) => {
+      bg.clear();
+      const w = 230, h = 20;
+      bg.roundRect(-w / 2, -h / 2, w, h, h / 2);
+      bg.fill({ color: valid ? 0x00c853 : 0x880000, alpha: valid ? 0.95 : 0.85 });
+      bg.stroke({ color: valid ? 0x00e676 : 0xff5252, width: 1.5, alpha: 0.9 });
+      text.text = valid ? label : '⚠ OVERLAPPING BALL';
+      text.style.fill = valid ? 0x001a00 : 0xffcccc;
+      btn.cursor = valid ? 'pointer' : 'default';
+    };
+    drawState(true);
+    btn._drawState = drawState;
+
+    btn.on('pointerdown', (e) => { e.stopPropagation(); onConfirm(); });
+
+    this._bihConfirmButton = btn;
+    this.uiContainer.addChild(btn);
+  }
+
+  /**
+   * Updates the visual state of the BIH confirm button (valid ↔ invalid).
+   * Called from AimingControls._placeCueBallAt() on every position update.
+   */
+  updateBallInHandButton(valid) {
+    if (this._bihConfirmButton?._drawState) {
+      this._bihConfirmButton._drawState(valid);
+    }
+  }
+
+  /**
+   * Removes the BIH confirm button from the canvas.
+   */
+  hideBallInHandConfirmButton() {
+    if (this._bihConfirmButton) {
+      this.uiContainer.removeChild(this._bihConfirmButton);
+      this._bihConfirmButton.destroy({ children: true });
+      this._bihConfirmButton = null;
+    }
+  }
+
   /**
    * Appends a full-width coloured overlay div that sweeps across the HUD
    * to signal a player switch. Automatically removes itself after the
@@ -572,7 +769,7 @@ export class CanvasRenderer {
         const countdown = this.gameRef.lockCountdown;
         this.activePlayerText.text = `🔒 ${locked.toUpperCase()} LOCKED\n(${opponent}: ${countdown} left)`;
       } else {
-        this.activePlayerText.text = `${name.toUpperCase()}\n(Aim & Shoot)`;
+        this.activePlayerText.text = `${name.toUpperCase()}\n(Drag=Aim / Slide=Shoot)`;
       }
 
       if (this.centerBadgeBg) {
@@ -729,31 +926,20 @@ export class CanvasRenderer {
       return;
     }
 
-    const { startX, startY, strokeDir, powerRatio, isLocked } = aimData;
+    const { startX, startY, strokeDir, powerRatio, isAiming } = aimData;
     const visuals = this.config.visuals.aiming;
 
-    // Update HUD center text based on lock state
+    // Update HUD center text
     if (this.activePlayerText) {
-      if (isLocked) {
-        this.activePlayerText.text = "AIM LOCKED\n(Pull Slider)";
-        if (this.centerBadgeBg) {
-          this.centerBadgeBg.clear();
-          this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
-          this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
-          this.centerBadgeBg.stroke({ color: 0xffd700, width: 2, alpha: 0.9 });
-        }
-        this.activePlayerText.style.fill = 0xffd700;
-      } else {
-        const themeColor = this.activePlayerName === this.player1Name ? 0x00e5ff : 0xe040fb;
-        this.activePlayerText.text = `${this.activePlayerName.toUpperCase()}\n(Aim & Shoot)`;
-        if (this.centerBadgeBg) {
-          this.centerBadgeBg.clear();
-          this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
-          this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
-          this.centerBadgeBg.stroke({ color: themeColor, width: 1.5, alpha: 0.8 });
-        }
-        this.activePlayerText.style.fill = themeColor;
+      const themeColor = this.activePlayerName === this.player1Name ? 0x00e5ff : 0xe040fb;
+      this.activePlayerText.text = `${this.activePlayerName.toUpperCase()}\n(Drag=Aim / Slide=Shoot)`;
+      if (this.centerBadgeBg) {
+        this.centerBadgeBg.clear();
+        this.centerBadgeBg.roundRect(0, 0, 240, 50, 25);
+        this.centerBadgeBg.fill({ color: 0x080f21, alpha: 0.85 });
+        this.centerBadgeBg.stroke({ color: isAiming ? 0xffd700 : themeColor, width: isAiming ? 2 : 1.5, alpha: 0.9 });
       }
+      this.activePlayerText.style.fill = isAiming ? 0xffd700 : themeColor;
     }
 
     // A. Draw the solid interactive cue stick pointing towards the cue ball
@@ -789,22 +975,22 @@ export class CanvasRenderer {
       width: 5
     });
 
-    // Draw glowing ring around start coordinates (cue ball position) if locked
-    if (isLocked) {
+    // Draw glowing ring around cue ball while actively dragging
+    if (isAiming) {
       this.aimGraphics.circle(startX, startY, this.config.ball.radius + 4);
       this.aimGraphics.stroke({
-        color: 0x00e5ff,
+        color: 0xffd700,
         width: 2,
         alpha: 0.8
       });
     }
 
     // C. Draw Aiming Laser Assist — dashed line to ghost ball only (no deflection lines, no pocket glow)
-    const laserColor = isLocked ? 0x00e5ff : visuals.laserColor;
-    const laserWidth = isLocked ? 2.5 : 2;
-    const laserAlpha = isLocked ? 0.9 : visuals.laserAlpha;
-    const infiniteLaserWidth = isLocked ? 2.5 : 1.5;
-    const infiniteLaserAlpha = isLocked ? 0.9 : 0.3;
+    const laserColor = isAiming ? 0x00e5ff : visuals.laserColor;
+    const laserWidth = isAiming ? 2.5 : 2;
+    const laserAlpha = isAiming ? 0.9 : visuals.laserAlpha;
+    const infiniteLaserWidth = isAiming ? 2.5 : 1.5;
+    const infiniteLaserAlpha = isAiming ? 0.9 : 0.3;
 
     if (aimData.hasHit && aimData.ghostCenter) {
       const { ghostCenter } = aimData;
@@ -819,9 +1005,9 @@ export class CanvasRenderer {
       // Draw ghost cue ball outline at the exact contact point
       this.aimGraphics.circle(ghostCenter.x, ghostCenter.y, this.config.ball.radius);
       this.aimGraphics.stroke({
-        color: isLocked ? 0x00e5ff : visuals.ghostColor,
+        color: isAiming ? 0x00e5ff : visuals.ghostColor,
         width: 1.5,
-        alpha: isLocked ? 0.9 : visuals.ghostAlpha
+        alpha: isAiming ? 0.9 : visuals.ghostAlpha
       });
     } else {
       // No hit — draw a long dashed helper line in the aim direction
@@ -915,23 +1101,26 @@ export class CanvasRenderer {
       g.glow.circle(0, 0, this.config.pocket.radius + 3);
       g.glow.fill({ color: glowColor, alpha: glowAlpha });
 
-      // Draw suit symbol / star text inside pocket
+      // Draw suit symbol inside pocket — vector paths for the four card suits,
+      // text for the wildcard star (which has no distortion issue).
       if (suit !== null) {
-        const symbols = { S: '♠', H: '♥', D: '♦', C: '♣', W: '★' };
-        const symbolText = symbols[suit] || '';
-
-        const style = new TextStyle({
-          fontFamily: 'Inter, Arial, sans-serif',
-          fontSize: 18,
-          fontWeight: 'bold',
-          fill: color
-        });
-
-        const text = new Text({ text: symbolText, style: style });
-        text.anchor.set(0.5);
-        text.x = 0;
-        text.y = 0;
-        g.suitContainer.addChild(text);
+        if (suit === 'W') {
+          const style = new TextStyle({
+            fontFamily: 'Inter, Arial, sans-serif',
+            fontSize: 18,
+            fontWeight: 'bold',
+            fill: color
+          });
+          const star = new Text({ text: '★', style });
+          star.anchor.set(0.5);
+          star.x = 0;
+          star.y = 0;
+          g.suitContainer.addChild(star);
+        } else {
+          const suitG = new Graphics();
+          this._drawSuitIcon(suitG, suit, 0, 0, 18, color);
+          g.suitContainer.addChild(suitG);
+        }
       }
     });
   }
@@ -990,9 +1179,10 @@ export class CanvasRenderer {
     const isRed = card.suit === 'H' || card.suit === 'D';
     const fillStyle = isRed ? 0xd32f2f : 0x212121;
 
+    // Rank: top-third of card, centred
     const rankStyle = new TextStyle({
       fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 12,
+      fontSize: 13,
       fontWeight: 'bold',
       fill: fillStyle
     });
@@ -1000,29 +1190,21 @@ export class CanvasRenderer {
     const rankText = new Text({ text: rankStr, style: rankStyle });
     rankText.anchor.set(0.5);
     rankText.x = 16;
-    rankText.y = 15;
+    rankText.y = 14;
     cardView.addChild(rankText);
 
     // Draw horizontal underline for 6 and 9 mini-cards on HUD
     if (rankStr === '6' || rankStr === '9') {
       const underline = new Graphics();
-      underline.rect(11, 21, 10, 1.5);
+      underline.rect(10, 21, 12, 1.5);
       underline.fill({ color: fillStyle });
       cardView.addChild(underline);
     }
 
-    const suitStyle = new TextStyle({
-      fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 16,
-      fontWeight: 'bold',
-      fill: fillStyle
-    });
-
-    const suitText = new Text({ text: suitStr, style: suitStyle });
-    suitText.anchor.set(0.5);
-    suitText.x = 16;
-    suitText.y = 31;
-    cardView.addChild(suitText);
+    // Suit: vector icon drawn at fixed size — identical bounding box for all four suits
+    const suitG = new Graphics();
+    this._drawSuitIcon(suitG, card.suit, 16, 32, 13, fillStyle);
+    cardView.addChild(suitG);
 
     container.addChild(cardView);
   }
@@ -1056,13 +1238,13 @@ export class CanvasRenderer {
     const p2TokenCount = discardTokens?.[this.player2Name] ?? 0;
 
     // 3a. Update real-time poker hand label below card slots
-    if (this.p1HandLabel) {
-      this.p1HandLabel.text = this._getPartialHandLabel(p1Hand);
-    }
+    // if (this.p1HandLabel) {
+    //   this.p1HandLabel.text = this._getPartialHandLabel(p1Hand);
+    // }
 
-    if (this.p2HandLabel) {
-      this.p2HandLabel.text = this._getPartialHandLabel(p2Hand);
-    }
+    // if (this.p2HandLabel) {
+    //   this.p2HandLabel.text = this._getPartialHandLabel(p2Hand);
+    // }
 
     // 4. Update token dot indicators (filled = token remaining, dim = spent)
     for (let i = 0; i < 3; i++) {

@@ -3,6 +3,56 @@ import Matter from 'matter-js';
 import { compareHands, evaluatePokerHand } from './poker.js';
 
 /**
+ * Returns an inline SVG string for a playing-card suit symbol.
+ * All four suits use the exact same bounding box so they always render at
+ * identical sizes — no font-metric or emoji-rendering inconsistencies.
+ *
+ * @param {string} suit  'S' | 'H' | 'D' | 'C'
+ * @param {number} size  Width & height in px (default 16)
+ * @returns {string} HTML snippet containing an <svg> element
+ */
+function suitSvg(suit, size = 16) {
+  const s = size / 2;
+  const cx = s, cy = s;
+  const isRed = suit === 'H' || suit === 'D';
+  const color = isRed ? '#d32f2f' : '#1a1a1a';
+
+  const f = n => n.toFixed(2); // compact coordinate formatter
+
+  let shapes = '';
+  if (suit === 'D') {
+    shapes = `<polygon points="${f(cx)},${f(cy-s)} ${f(cx+s*0.72)},${f(cy)} ${f(cx)},${f(cy+s)} ${f(cx-s*0.72)},${f(cy)}" fill="${color}"/>`;
+
+  } else if (suit === 'H') {
+    const lr = f(s * 0.55);
+    shapes = `
+      <circle cx="${f(cx-s*0.30)}" cy="${f(cy-s*0.15)}" r="${lr}" fill="${color}"/>
+      <circle cx="${f(cx+s*0.30)}" cy="${f(cy-s*0.15)}" r="${lr}" fill="${color}"/>
+      <polygon points="${f(cx-s*0.90)},${f(cy-s*0.10)} ${f(cx+s*0.90)},${f(cy-s*0.10)} ${f(cx)},${f(cy+s)}" fill="${color}"/>`;
+
+  } else if (suit === 'S') {
+    const lr = f(s * 0.50);
+    shapes = `
+      <polygon points="${f(cx)},${f(cy-s)} ${f(cx+s*0.90)},${f(cy+s*0.25)} ${f(cx-s*0.90)},${f(cy+s*0.25)}" fill="${color}"/>
+      <circle cx="${f(cx-s*0.35)}" cy="${f(cy+s*0.12)}" r="${lr}" fill="${color}"/>
+      <circle cx="${f(cx+s*0.35)}" cy="${f(cy+s*0.12)}" r="${lr}" fill="${color}"/>
+      <polygon points="${f(cx-s*0.20)},${f(cy+s*0.35)} ${f(cx+s*0.20)},${f(cy+s*0.35)} ${f(cx+s*0.20)},${f(cy+s*0.75)} ${f(cx-s*0.20)},${f(cy+s*0.75)}" fill="${color}"/>
+      <polygon points="${f(cx-s*0.55)},${f(cy+s)} ${f(cx+s*0.55)},${f(cy+s)} ${f(cx+s*0.25)},${f(cy+s*0.72)} ${f(cx-s*0.25)},${f(cy+s*0.72)}" fill="${color}"/>`;
+
+  } else if (suit === 'C') {
+    const cr = f(s * 0.44);
+    shapes = `
+      <circle cx="${f(cx)}"           cy="${f(cy-s*0.30)}" r="${cr}" fill="${color}"/>
+      <circle cx="${f(cx-s*0.46)}"    cy="${f(cy+s*0.22)}" r="${cr}" fill="${color}"/>
+      <circle cx="${f(cx+s*0.46)}"    cy="${f(cy+s*0.22)}" r="${cr}" fill="${color}"/>
+      <polygon points="${f(cx-s*0.20)},${f(cy+s*0.38)} ${f(cx+s*0.20)},${f(cy+s*0.38)} ${f(cx+s*0.20)},${f(cy+s*0.72)} ${f(cx-s*0.20)},${f(cy+s*0.72)}" fill="${color}"/>
+      <polygon points="${f(cx-s*0.55)},${f(cy+s)} ${f(cx+s*0.55)},${f(cy+s)} ${f(cx+s*0.25)},${f(cy+s*0.70)} ${f(cx-s*0.25)},${f(cy+s*0.70)}" fill="${color}"/>`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="display:inline-block;vertical-align:middle;flex-shrink:0">${shapes}</svg>`;
+}
+
+/**
  * Orchestrates game rules, player active turns, coin toss,
  * and handles the discard-token system and lock-based endgame.
  */
@@ -251,31 +301,287 @@ export class GameEngine {
     }
 
     // ── NORMAL BALL PROCESSING ───────────────────────────────────────────────
-    let anyValidScore = false;
-    const invalidReasons = [];
 
-    for (const detail of this.pocketedBallsDetails) {
-      const { ballId } = detail;
-      const originalBall = (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId);
-      if (!originalBall) continue;
+    // Phase 1: For each pocketed ball, prompt for suit mapping / wildcard selection
+    // and collect all new cards. No hand dialog yet.
+    const { cardsToAdd, ballActions, invalidReasons, anyValid } =
+      await this._resolveNewCards(physics);
 
-      const result = (ballId >= 1 && ballId <= 13)
-        ? await this._processRankBall(detail, originalBall, physics, opponent)
-        : await this._processWildcardBall(detail, originalBall, physics, opponent);
+    // Phase 2: Show ONE unified hand dialog for all new cards at once
+    if (cardsToAdd.length > 0) {
+      const { tokensSpent } = await this._showUnifiedHandDialog(this.activePlayer, cardsToAdd);
+      this.discardTokens[this.activePlayer] = Math.max(
+        0,
+        (this.discardTokens[this.activePlayer] ?? 0) - tokensSpent
+      );
 
-      if (result.valid) anyValidScore = true;
-      if (result.invalidReason) invalidReasons.push(result.invalidReason);
+      // Track who first completed a full 5-card hand
+      if (this.hands[this.activePlayer].length === 5 && !this.firstToCompleteHand) {
+        this.firstToCompleteHand = this.activePlayer;
+      }
     }
 
+    // Phase 3: Apply physics actions (respawn or permanently remove wildcard balls)
+    for (const { ball, action } of ballActions) {
+      if (action === 'remove') {
+        if (this.renderer) this.renderer.setBallVisibility(ball.id, false);
+        Matter.Composite.remove(physics.world, ball);
+        physics.targetBalls = physics.targetBalls.filter(b => b.id !== ball.id);
+      } else {
+        physics.respawnBall(ball);
+        if (this.renderer) this.renderer.setBallVisibility(ball.id, true);
+      }
+    }
+
+    if (this.renderer) this.renderer.updatePocketGraphics(this.pocketSuits);
+
     const scorer = this.activePlayer;
-    this._resolveTurn(anyValidScore, invalidReasons, opponent);
+    this._resolveTurn(anyValid, invalidReasons, opponent);
 
     if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
 
     if (this.gameEnded) return;
 
-    // Check if the scoring player just became locked
     this._checkAndTriggerLock(scorer);
+  }
+
+  /**
+   * Phase 1 of multi-ball processing: iterates every pocketed ball, issues suit-mapping
+   * prompts (Phase 1) or wildcard-selection prompts as needed, and collects the list of
+   * cards that should be offered to the active player.  Ball physics actions (respawn /
+   * remove) are collected but NOT yet applied — that happens after the hand dialog.
+   *
+   * @returns {Promise<{cardsToAdd: Array, ballActions: Array, invalidReasons: Array, anyValid: boolean}>}
+   */
+  async _resolveNewCards(physics) {
+    const opponent = this.activePlayer === this.player1Name ? this.player2Name : this.player1Name;
+    const cardsToAdd = [];
+    const ballActions = [];
+    const invalidReasons = [];
+    let anyValid = false;
+
+    for (const detail of this.pocketedBallsDetails) {
+      const { ballId, pocketId } = detail;
+      const originalBall =
+        (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId)
+        || detail.ball;
+      if (!originalBall) continue;
+
+      const isWildcard = ballId > 13; // balls 14–15 are wildcards
+
+      if (!isWildcard) {
+        // ── Rank ball (1–13) ────────────────────────────────────────────────
+        let suit = this.pocketSuits[pocketId];
+
+        // Hoist hand references early — needed for both exhaustion check and duplicate check.
+        const hand = this.hands[this.activePlayer] || [];
+        const oppHand = this.hands[opponent] || [];
+
+        // Rank exhaustion: if all 4 suited versions of this rank are already held
+        // (across both players combined), the ball can never yield a new card.
+        // Remove it permanently rather than cycling it back to the table forever.
+        const rankExhausted = ['S', 'H', 'D', 'C'].every(s =>
+          hand.some(c => c.rank === ballId && c.suit === s) ||
+          oppHand.some(c => c.rank === ballId && c.suit === s)
+        );
+        const rankAction = rankExhausted ? 'remove' : 'respawn';
+
+        if (suit === null) {
+          if (this.phase === 1) {
+            // ── AUTO-ASSIGN a random suit from the remaining unclaimed suits ──
+            // No player prompt needed — random assignment keeps game flow smooth
+            // since all suits are equally valuable.
+            const claimedSuits = this.pocketSuits.filter(s => s !== null && s !== 'W');
+            const allSuits = ['S', 'H', 'D', 'C'];
+            const remaining = allSuits.filter(s => !claimedSuits.includes(s));
+            const autoSuit = remaining[Math.floor(Math.random() * remaining.length)] || 'S';
+            this.pocketSuits[pocketId] = autoSuit;
+            suit = autoSuit;
+
+            // Brief notification so players know which suit was assigned
+            const suitNames = { S: 'Spades', H: 'Hearts', D: 'Diamonds', C: 'Clubs' };
+            this.showShotToast(`🎲 New pocket → ${suitNames[autoSuit]}!`, 'score', 2000);
+
+            // Auto-promote remaining unmapped pockets to Wild when 4 suits are set
+            const mappedCount = this.pocketSuits.filter(s => s !== null && s !== 'W').length;
+            if (mappedCount === 4) {
+              this.phase = 2;
+              this.pocketSuits.forEach((s, idx) => { if (s === null) this.pocketSuits[idx] = 'W'; });
+            }
+            if (this.renderer) this.renderer.updatePocketGraphics(this.pocketSuits);
+          } else {
+            // Phase 2 with unmapped pocket — shouldn't normally happen, treat as invalid
+            ballActions.push({ ball: originalBall, action: rankAction });
+            invalidReasons.push('rank_in_wild');
+            continue;
+          }
+        }
+
+        if (suit === 'W') {
+          ballActions.push({ ball: originalBall, action: rankAction });
+          invalidReasons.push('rank_in_wild');
+          continue;
+        }
+
+        // Check for duplicates across both hands
+        const alreadyHeld = hand.some(c => c.rank === ballId && c.suit === suit)
+                         || oppHand.some(c => c.rank === ballId && c.suit === suit);
+
+        if (!alreadyHeld) {
+          cardsToAdd.push({ rank: ballId, suit });
+          anyValid = true;
+        } else {
+          invalidReasons.push('duplicate');
+        }
+        ballActions.push({ ball: originalBall, action: rankAction });
+
+      } else {
+        // ── Wildcard ball (14–15) ────────────────────────────────────────────
+        const suit = this.pocketSuits[pocketId];
+
+        if (suit === 'W') {
+          const chosenCard = await this.promptWildcardSelection(this.activePlayer);
+
+          const hand = this.hands[this.activePlayer] || [];
+          const oppHand = this.hands[opponent] || [];
+          const alreadyHeld = hand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit)
+                           || oppHand.some(c => c.rank === chosenCard.rank && c.suit === chosenCard.suit);
+
+          if (!alreadyHeld) {
+            cardsToAdd.push(chosenCard);
+            anyValid = true;
+          } else {
+            invalidReasons.push('duplicate');
+          }
+          // Wildcards are permanently removed from the table
+          ballActions.push({ ball: originalBall, action: 'remove' });
+        } else {
+          ballActions.push({ ball: originalBall, action: 'respawn' });
+          invalidReasons.push('wildcard_wrong_pocket');
+        }
+      }
+    }
+
+    return { cardsToAdd, ballActions, invalidReasons, anyValid };
+  }
+
+  /**
+   * Phase 2 of multi-ball processing: shows ONE unified dialog containing the player's
+   * full current hand PLUS all new cards earned this shot.  The player discards as needed
+   * to reach ≤ 5 cards, then confirms with Keep.
+   *
+   * Overflow discards (while total > 5) are FREE.
+   * Discards that bring the hand from 5 → 4 cost one token each.
+   *
+   * @param {string} player  Active player name
+   * @param {Array}  newCards  Cards collected this shot (already duplicate-checked)
+   * @returns {Promise<{tokensSpent: number}>}
+   */
+  _showUnifiedHandDialog(player, newCards) {
+    return new Promise((resolve) => {
+      if (this.controls) this.controls.enabled = false;
+
+      const hand = this.hands[player];
+      let availableTokens = this.discardTokens[player] ?? 0;
+      let tokensSpent = 0;
+
+      const isP1 = player === this.player1Name;
+      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
+      const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+
+      const container = document.getElementById('game-container') || document.body;
+      const overlay = document.createElement('div');
+      overlay.className = 'discard-choice-overlay';
+      container.appendChild(overlay);
+
+      // Build a working copy of the combined hand (existing + new).
+      // Each entry carries a unique `uid` so selection stays stable across re-renders.
+      let workingHand = [
+        ...hand.map((c, i) => ({ ...c, isNew: false, uid: `old_${i}` })),
+        ...newCards.map((c, i) => ({ ...c, isNew: true, uid: `new_${i}` }))
+      ];
+
+      let selectedUid = null;
+
+      const renderContent = () => {
+        const isOverflow = workingHand.length > 5;
+        const canKeep = !isOverflow;
+        const freeDiscard = isOverflow; // overflow discard costs nothing
+        const canDiscard = freeDiscard || availableTokens > 0;
+
+        const cardsHtml = workingHand.map(c => {
+          const r = rankLabels[c.rank] || String(c.rank);
+          const sIcon = suitSvg(c.suit, 16); // vector SVG — identical size for all suits
+          const red = c.suit === 'H' || c.suit === 'D';
+          const isSelected = c.uid === selectedUid;
+          return `<div class="discard-card-item${c.isNew ? ' new-card' : ''}${red ? ' red-suit' : ''}${isSelected ? ' selected' : ''}" data-uid="${c.uid}">
+            <div class="preview-top">${r}</div>
+            <div class="preview-center">${sIcon}</div>
+            <div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${r}</div>
+            ${c.isNew ? '<div class="new-card-label">NEW</div>' : ''}
+          </div>`;
+        }).join('');
+
+        const discardLabel = freeDiscard
+          ? 'Discard (Free)'
+          : `Discard (${availableTokens} chance${availableTokens !== 1 ? 's' : ''} left)`;
+
+        overlay.innerHTML = `
+          <div class="discard-choice-card" style="border-color:${accentColor}40">
+            <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — YOUR HAND</div>
+            ${isOverflow ? `<div style="color:#ff9800;font-size:11px;text-align:center;margin-bottom:8px;">Hand exceeds 5 — discard until you reach 5 or fewer</div>` : ''}
+            <div class="discard-picker-grid" id="hand-grid">${cardsHtml}</div>
+            <div class="discard-actions">
+              <button class="discard-btn-add" id="dc-keep"${canKeep ? '' : ' disabled'}>Keep</button>
+              ${canDiscard ? `<button class="discard-btn-token" id="dc-discard"${selectedUid ? '' : ' disabled'}>${discardLabel}</button>` : ''}
+            </div>
+          </div>
+        `;
+
+        // Card click — select / deselect
+        overlay.querySelectorAll('#hand-grid .discard-card-item').forEach(el => {
+          el.addEventListener('click', () => {
+            const uid = el.getAttribute('data-uid');
+            selectedUid = uid === selectedUid ? null : uid; // toggle
+            renderContent();
+          });
+        });
+
+        // Keep — commit working hand to real hand
+        const keepBtn = overlay.querySelector('#dc-keep');
+        if (keepBtn) {
+          keepBtn.addEventListener('click', () => {
+            hand.splice(0, hand.length, ...workingHand.map(c => ({ rank: c.rank, suit: c.suit })));
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+              overlay.remove();
+              if (this.controls) this.controls.enabled = true;
+              resolve({ tokensSpent });
+            }, 300);
+          });
+        }
+
+        // Discard — remove selected card, deduct token if not a free overflow discard
+        const discardBtn = overlay.querySelector('#dc-discard');
+        if (discardBtn) {
+          discardBtn.addEventListener('click', () => {
+            if (!selectedUid) return;
+            const beforeSize = workingHand.length;
+            workingHand = workingHand.filter(c => c.uid !== selectedUid);
+            // Token cost only when the discard does NOT reduce an overflow (i.e. beforeSize ≤ 5)
+            const wasOverflow = beforeSize > 5;
+            if (!wasOverflow && availableTokens > 0) {
+              availableTokens--;
+              tokensSpent++;
+            }
+            selectedUid = null;
+            renderContent();
+          });
+        }
+      };
+
+      renderContent();
+    });
   }
 
   /**
@@ -440,57 +746,40 @@ export class GameEngine {
   }
 
   /**
-   * Core card-addition gateway.
-   * Shows the discard-token prompt. Player can:
-   *   • Add card for free (hand < 5)
-   *   • Spend a token to discard any card (new or existing)
-   * When the hand reaches 5, shows a ONE-TIME "last chance" prompt:
-   *   • Use a token to remove one card (hand drops to 4, play continues)
-   *   • Decline → player is immediately locked
-   * Returns true if the card was ultimately added to the player's hand.
+   * Core card-addition gateway. Shows the unified hand dialog where the player
+   * sees their full current hand plus the new card and decides to Keep or Discard.
+   * Returns true if the new card was added to the player's hand.
    */
   async _processCardAddition(player, newCard) {
-    const hand = this.hands[player];
+    if (this.lockedPlayers[player]) return false;
 
-    // Hard guard: locked players should never reach here (intercepted by interference path)
-    if (hand.length >= 5) return false;
+    const hand = this.hands[player];
+    const tokens = this.discardTokens[player] ?? 0;
 
     const result = await this.promptDiscardChoice(player, newCard);
 
     if (result.usedToken) {
-      this.discardTokens[player] = Math.max(0, (this.discardTokens[player] ?? 0) - 1);
+      this.discardTokens[player] = Math.max(0, tokens - 1);
     }
 
-    // Track who first built a complete 5-card hand
     if (result.added && hand.length === 5 && !this.firstToCompleteHand) {
       this.firstToCompleteHand = player;
     }
 
-    // Hand just hit 5 → one last chance to discard before locking
-    if (result.added && hand.length === 5) {
-      const tokensNow = this.discardTokens[player] ?? 0;
-      if (tokensNow > 0) {
-        const usedLastChance = await this._promptLastChanceDiscard(player);
-        if (usedLastChance) {
-          // They discarded one card, hand is back at 4 — no lock
-          if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
-          return result.added;
-        }
-      }
-      // No tokens OR declined → lock now
-      this.triggerLock(player);
-    }
+    // Check lock immediately so subsequent balls in this shot respect the new state
+    this._checkAndTriggerLock(player);
 
     return result.added;
   }
 
   /**
-   * One-time "hand complete" prompt when player's hand just reached 5.
-   * Player can spend ONE token to remove any card (hand drops to 4), or lock in.
-   * Handles its own token decrement.
-   * @returns {Promise<boolean>} true if they used the token and discarded, false if locked
+   * Unified hand dialog: shows the player's full current hand plus the new card.
+   * Player clicks a card to select it (enables Discard), or presses Keep to accept all.
+   * "Keep" is disabled when adding the new card would exceed 5 cards.
+   * "Discard" is only shown when tokens > 0 and costs one token when pressed.
+   * @returns {Promise<{added: boolean, usedToken: boolean}>}
    */
-  _promptLastChanceDiscard(player) {
+  promptDiscardChoice(player, newCard) {
     return new Promise((resolve) => {
       if (this.controls) this.controls.enabled = false;
 
@@ -501,92 +790,9 @@ export class GameEngine {
       const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
       const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
 
-      const container = document.getElementById('game-container') || document.body;
-      const overlay = document.createElement('div');
-      overlay.className = 'discard-choice-overlay';
-
-      const tokenDots = Array.from({ length: 3 }, (_, i) =>
-        `<span class="token-dot${i < tokens ? ' active' : ''}"></span>`
-      ).join('');
-
-      const cardHtml = (card, idx) => {
-        const r = rankLabels[card.rank] || String(card.rank);
-        const s = suitSymbols[card.suit] || card.suit;
-        const red = card.suit === 'H' || card.suit === 'D';
-        return `<div class="discard-card-item${red ? ' red-suit' : ''}" data-idx="${idx}">
-          <div class="preview-top">${r}</div>
-          <div class="preview-center">${s}</div>
-          <div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${r}</div>
-        </div>`;
-      };
-
-      overlay.innerHTML = `
-        <div class="discard-choice-card" style="border-color:${accentColor}60">
-          <div class="discard-choice-header" style="color:${accentColor}">🏆 ${player.toUpperCase()} — HAND COMPLETE</div>
-          <div style="color:#b0bec5;font-size:11px;text-align:center;line-height:1.5;">Your hand is full! Last chance to swap a card using one discard token.<br>If you decline, your hand locks in immediately.</div>
-          <div class="discard-actions" id="lc-actions">
-            <button class="discard-btn-token" id="lc-discard">✂ USE TOKEN — REMOVE A CARD</button>
-            <button class="discard-btn-skip" id="lc-lock">🔒 LOCK MY HAND</button>
-          </div>
-          <div id="lc-picker" style="display:none;width:100%">
-            <div class="discard-picker-label">Pick a card to remove from your hand:</div>
-            <div class="discard-picker-grid" id="lc-grid">${hand.map((c, i) => cardHtml(c, i)).join('')}</div>
-            <button class="discard-btn-confirm" id="lc-confirm" disabled>CONFIRM REMOVE</button>
-          </div>
-        </div>
-      `;
-      container.appendChild(overlay);
-
-      let selectedIdx = -1;
-
-      const doResolve = (used) => {
-        overlay.style.opacity = '0';
-        setTimeout(() => {
-          overlay.remove();
-          if (this.controls) this.controls.enabled = true;
-          resolve(used);
-        }, 300);
-      };
-
-      overlay.querySelector('#lc-lock').addEventListener('click', () => doResolve(false));
-
-      overlay.querySelector('#lc-discard').addEventListener('click', () => {
-        overlay.querySelector('#lc-actions').style.display = 'none';
-        overlay.querySelector('#lc-picker').style.display = 'block';
-
-        overlay.querySelectorAll('#lc-grid .discard-card-item').forEach(el => {
-          el.addEventListener('click', () => {
-            overlay.querySelectorAll('#lc-grid .discard-card-item').forEach(e => e.classList.remove('selected'));
-            el.classList.add('selected');
-            selectedIdx = parseInt(el.getAttribute('data-idx'));
-            overlay.querySelector('#lc-confirm').disabled = false;
-          });
-        });
-      });
-
-      overlay.querySelector('#lc-confirm').addEventListener('click', () => {
-        if (selectedIdx < 0) return;
-        hand.splice(selectedIdx, 1); // hand goes from 5 → 4
-        this.discardTokens[player] = Math.max(0, (this.discardTokens[player] ?? 0) - 1);
-        doResolve(true);
-      });
-    });
-  }
-
-  /**
-   * Shows the discard-choice modal and returns the player's decision.
-   * @returns {Promise<{added: boolean, usedToken: boolean, swappedOut: boolean}>}
-   */
-  promptDiscardChoice(player, newCard) {
-    return new Promise((resolve) => {
-      if (this.controls) this.controls.enabled = false;
-
-      const hand = this.hands[player]; // always < 5 when called
-      const tokens = this.discardTokens[player] ?? 0;
-      const isP1 = player === this.player1Name;
-      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
-      const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
-      const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+      const isOverflow = hand.length >= 5;  // total cards would exceed 5
+      const canKeep = !isOverflow;
+      const showDiscard = tokens > 0 || isOverflow; // overflow discard is always free
 
       const container = document.getElementById('game-container') || document.body;
       const overlay = document.createElement('div');
@@ -604,92 +810,67 @@ export class GameEngine {
         </div>`;
       };
 
-      const newR = rankLabels[newCard.rank] || String(newCard.rank);
-      const newS = suitSymbols[newCard.suit] || newCard.suit;
-      const newRed = newCard.suit === 'H' || newCard.suit === 'D';
-
-      const tokenDots = Array.from({ length: 3 }, (_, i) =>
-        `<span class="token-dot${i < tokens ? ' active' : ''}"></span>`
-      ).join('');
+      const allCards = [...hand, newCard];
+      const cardsGrid = allCards.map((c, i) => cardHtml(c, i, i === hand.length)).join('');
 
       overlay.innerHTML = `
         <div class="discard-choice-card" style="border-color:${accentColor}40">
-          <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — BALL POCKETED</div>
-          <div class="discard-new-card-row">
-            <div class="discard-new-label">New card earned:</div>
-            <div class="discard-card-item new-card${newRed ? ' red-suit' : ''}" style="border-color:${accentColor}">
-              <div class="preview-top">${newR}</div>
-              <div class="preview-center">${newS}</div>
-              <div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${newR}</div>
-            </div>
-          </div>
-          <div class="discard-actions" id="discard-actions">
-            <button class="discard-btn-add" id="dc-add">ADD TO HAND</button>
-            ${tokens > 0 ? `<button class="discard-btn-token" id="dc-token">Discard (${tokens} chance${tokens !== 1 ? 's' : ''} left)</button>` : ''}
-          </div>
-          <div class="discard-picker" id="discard-picker" style="display:none">
-            <div class="discard-picker-label">Pick a card to discard (including the new one):</div>
-            <div class="discard-picker-grid" id="discard-picker-grid"></div>
-            <button class="discard-btn-confirm" id="dc-confirm" disabled>CONFIRM DISCARD</button>
+          <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — YOUR HAND</div>
+          <div class="discard-picker-grid" id="hand-grid">${cardsGrid}</div>
+          <div class="discard-actions">
+            <button class="discard-btn-add" id="dc-keep"${canKeep ? '' : ' disabled'}>Keep</button>
+            ${showDiscard ? `<button class="discard-btn-token" id="dc-discard" disabled>${isOverflow ? 'Discard (Free)' : `Discard (${tokens} chance${tokens !== 1 ? 's' : ''} left)`}</button>` : ''}
           </div>
         </div>
       `;
       container.appendChild(overlay);
 
-      let selectedDiscardIdx = -1;
+      let selectedIdx = -1;
 
-      const doResolve = (added, usedToken, swappedOut = false) => {
+      const doResolve = (added, usedToken) => {
         overlay.style.opacity = '0';
         setTimeout(() => {
           overlay.remove();
           if (this.controls) this.controls.enabled = true;
-          resolve({ added, usedToken, swappedOut });
+          resolve({ added, usedToken });
         }, 300);
       };
 
-      // "Add to hand" free path
-      overlay.querySelector('#dc-add').addEventListener('click', () => {
+      // Card selection — enables Discard button
+      overlay.querySelectorAll('#hand-grid .discard-card-item').forEach(el => {
+        el.addEventListener('click', () => {
+          overlay.querySelectorAll('#hand-grid .discard-card-item').forEach(e => e.classList.remove('selected'));
+          el.classList.add('selected');
+          selectedIdx = parseInt(el.getAttribute('data-idx'));
+          const discardBtn = overlay.querySelector('#dc-discard');
+          if (discardBtn) discardBtn.disabled = false;
+        });
+      });
+
+      // Keep — add new card as-is
+      overlay.querySelector('#dc-keep').addEventListener('click', () => {
         hand.push(newCard);
         doResolve(true, false);
       });
 
-      // "Use token" path — reveal picker
-      const tokenBtn = overlay.querySelector('#dc-token');
-      if (tokenBtn) {
-        tokenBtn.addEventListener('click', () => {
-          overlay.querySelector('#discard-actions').style.display = 'none';
-          const picker = overlay.querySelector('#discard-picker');
-          const grid = overlay.querySelector('#discard-picker-grid');
-          picker.style.display = 'block';
-
-          const allCards = [...hand, newCard];
-          grid.innerHTML = allCards.map((c, i) => cardHtml(c, i, i === hand.length)).join('');
-
-          grid.querySelectorAll('.discard-card-item').forEach(el => {
-            el.addEventListener('click', () => {
-              grid.querySelectorAll('.discard-card-item').forEach(e => e.classList.remove('selected'));
-              el.classList.add('selected');
-              selectedDiscardIdx = parseInt(el.getAttribute('data-idx'));
-              overlay.querySelector('#dc-confirm').disabled = false;
-            });
-          });
+      // Discard — remove selected card (new or existing)
+      // Token cost applies only when hand.length < 5 (overflow discards are free)
+      const discardBtn = overlay.querySelector('#dc-discard');
+      if (discardBtn) {
+        discardBtn.addEventListener('click', () => {
+          if (selectedIdx < 0) return;
+          const usedToken = !isOverflow; // free when total was > 5
+          if (selectedIdx === hand.length) {
+            // Selected card is the new one — just skip it
+            doResolve(false, usedToken);
+          } else {
+            // Selected card is an existing one — swap it out, keep new card
+            hand.splice(selectedIdx, 1);
+            hand.push(newCard);
+            doResolve(true, usedToken);
+          }
         });
       }
-
-      // Confirm discard
-      overlay.querySelector('#dc-confirm').addEventListener('click', () => {
-        if (selectedDiscardIdx < 0) return;
-        const allCards = [...hand, newCard];
-        const discardedNew = selectedDiscardIdx === hand.length;
-
-        if (discardedNew) {
-          doResolve(false, true, false);
-        } else {
-          hand.splice(selectedDiscardIdx, 1);
-          hand.push(newCard);
-          doResolve(true, true, true);
-        }
-      });
     });
   }
 
@@ -725,61 +906,10 @@ export class GameEngine {
     }
   }
 
-  promptSuitMapping(player, pocketId, ballId) {
-    return new Promise((resolve) => {
-      const claimedSuits = this.pocketSuits.filter(s => s !== null && s !== 'W');
-      const allSuits = ['S', 'H', 'D', 'C'];
-      const remainingSuits = allSuits.filter(s => !claimedSuits.includes(s));
+  /* DISABLED — suit mapping is now fully automatic (random assignment).
+     Keeping this method commented out for reference / future re-enablement.
 
-      if (remainingSuits.length === 1) { resolve(remainingSuits[0]); return; }
-
-      this.controls.enabled = false;
-      const container = document.getElementById('game-container') || document.body;
-      const overlay = document.createElement('div');
-      overlay.className = 'suit-mapping-overlay';
-
-      const pocketNames = ['Top Left Corner', 'Top Right Corner', 'Bottom Left Corner', 'Bottom Right Corner', 'Top Side', 'Bottom Side'];
-      const pocketName = pocketNames[pocketId] || `Pocket ${pocketId}`;
-      const ballName = ballId === 1 ? 'Ace' : ballId === 11 ? 'Jack' : ballId === 12 ? 'Queen' : ballId === 13 ? 'King' : ballId;
-
-      const { xCenter, yCenter, width, height, } = this.config.table;
-      const { sideOffset } = this.config.pocket;
-      const hw = width / 2, hh = height / 2;
-      const pocketPositions = [
-        { x: xCenter - hw, y: yCenter - hh, cls: 'top-left' },
-        { x: xCenter + hw, y: yCenter - hh, cls: 'top-right' },
-        { x: xCenter - hw, y: yCenter + hh, cls: 'bottom-left' },
-        { x: xCenter + hw, y: yCenter + hh, cls: 'bottom-right' },
-        { x: xCenter, y: yCenter - hh - sideOffset, cls: 'top-side' },
-        { x: xCenter, y: yCenter + hh + sideOffset, cls: 'bottom-side' }
-      ];
-      const pos = pocketPositions[pocketId] || { x: 512, y: 338, cls: '' };
-      const left = (pos.x / 10.24).toFixed(1);
-      const top = (pos.y / 5.76).toFixed(1);
-
-      overlay.innerHTML = `
-        <div class="suit-mapping-card ${pos.cls}" style="position:absolute;left:${left}%;top:${top}%;">
-          <h2 class="suit-mapping-title">CLAIM SUIT</h2>
-          <p class="suit-mapping-subtitle">${player.toUpperCase()} pocketed [${ballName}] in the ${pocketName}!<br>Map a suit to this pocket:</p>
-          <div class="suit-buttons-grid">
-            <button class="suit-btn spades" data-suit="S" ${!remainingSuits.includes('S') ? 'disabled' : ''}><span class="suit-symbol">♠</span><span class="suit-label">SPADES</span></button>
-            <button class="suit-btn hearts" data-suit="H" ${!remainingSuits.includes('H') ? 'disabled' : ''}><span class="suit-symbol">♥</span><span class="suit-label">HEARTS</span></button>
-            <button class="suit-btn diamonds" data-suit="D" ${!remainingSuits.includes('D') ? 'disabled' : ''}><span class="suit-symbol">♦</span><span class="suit-label">DIAMONDS</span></button>
-            <button class="suit-btn clubs" data-suit="C" ${!remainingSuits.includes('C') ? 'disabled' : ''}><span class="suit-symbol">♣</span><span class="suit-label">CLUBS</span></button>
-          </div>
-        </div>
-      `;
-      container.appendChild(overlay);
-
-      overlay.querySelectorAll('.suit-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const selectedSuit = btn.getAttribute('data-suit');
-          overlay.style.opacity = '0';
-          setTimeout(() => { overlay.remove(); this.controls.enabled = true; resolve(selectedSuit); }, 350);
-        });
-      });
-    });
-  }
+  promptSuitMapping(player, pocketId, ballId) { ... } */
 
   promptWildcardSelection(player) {
     return new Promise((resolve) => {
@@ -820,10 +950,10 @@ export class GameEngine {
           <div class="wild-card-preview-container"><div id="wild-card-preview" class="wild-card-preview"></div></div>
           <div class="wild-ranks-grid">${ranksHtml}</div>
           <div class="wild-suits-row">
-            <button class="wild-suit-btn spades" data-suit="S">♠</button>
-            <button class="wild-suit-btn hearts" data-suit="H">♥</button>
-            <button class="wild-suit-btn diamonds" data-suit="D">♦</button>
-            <button class="wild-suit-btn clubs" data-suit="C">♣</button>
+            <button class="wild-suit-btn spades"   data-suit="S">${suitSvg('S', 22)}</button>
+            <button class="wild-suit-btn hearts"   data-suit="H">${suitSvg('H', 22)}</button>
+            <button class="wild-suit-btn diamonds" data-suit="D">${suitSvg('D', 22)}</button>
+            <button class="wild-suit-btn clubs"    data-suit="C">${suitSvg('C', 22)}</button>
           </div>
           <button id="wild-confirm-btn" style="background:linear-gradient(135deg,#ffd700 0%,#ffb300 100%);color:#0d1527;border:none;border-radius:8px;padding:12px 25px;font-size:14px;font-weight:bold;cursor:pointer;width:100%;box-shadow:0 4px 15px rgba(255,215,0,0.4);letter-spacing:1px;">ADD TO HAND</button>
         </div>
@@ -831,13 +961,12 @@ export class GameEngine {
       container.appendChild(overlay);
 
       const updateCardPreview = () => {
-        const syms = { S: '♠', H: '♥', D: '♦', C: '♣' };
         const rl = rankNames[selectedRank] || String(selectedRank);
         const isRed = selectedSuit === 'H' || selectedSuit === 'D';
         const p = overlay.querySelector('#wild-card-preview');
         if (p) {
           p.className = `wild-card-preview${isRed ? ' red-suit' : ''}`;
-          p.innerHTML = `<div class="preview-top">${rl}</div><div class="preview-center">${syms[selectedSuit]}</div><div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${rl}</div>`;
+          p.innerHTML = `<div class="preview-top">${rl}</div><div class="preview-center">${suitSvg(selectedSuit, 20)}</div><div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${rl}</div>`;
         }
       };
 
@@ -902,7 +1031,7 @@ export class GameEngine {
         <div class="rules-row"><span class="rules-badge">🎱</span><span class="rules-text">The coin-toss winner places the cue ball <strong>anywhere in the kitchen</strong> (left of the head string) and breaks. Any balls pocketed on the break respawn — no cards or suits are claimed. ${this.config.rules.minBreakCushionContacts ?? 4} cushion contacts required if no ball drops, or it's a foul.</span></div>
 
         <div class="rules-section-header">Pocket Suits</div>
-        <div class="rules-row"><span class="rules-badge">6</span><span class="rules-text">6 pockets — 4 corners + 2 sides. First 4 balls pocketed into 4 different pockets each claim a <strong>suit</strong>. Once 4 suits are mapped, the remaining 2 become <strong>Wild ★ Pockets</strong>.</span></div>
+        <div class="rules-row"><span class="rules-badge">6</span><span class="rules-text">6 pockets — 4 corners + 2 sides. The first ball pocketed into an unclaimed pocket <strong>auto-assigns a random suit</strong> to that pocket. Once 4 suits are mapped, the remaining 2 become <strong>Wild ★ Pockets</strong>.</span></div>
 
         <div class="rules-section-header">Earning Cards</div>
         <div class="rules-row"><span class="rules-badge">✅</span><span class="rules-text"><strong>Pocket a ball into a valid suit pocket</strong> → earn that card. You may keep shooting until you miss (bonus turn).</span></div>
@@ -953,10 +1082,9 @@ export class GameEngine {
 
     const result = compareHands(handA, handB, null, null, this.firstToCompleteHand, this.player1Name, this.player2Name);
 
-    const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
     const rankSymbols = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
     const getHandStr = hand => hand.length === 0 ? 'Empty Hand' :
-      hand.map(c => `${rankSymbols[c.rank] || c.rank}${suitSymbols[c.suit] || c.suit}`).join(', ');
+      hand.map(c => `<span style="white-space:nowrap">${rankSymbols[c.rank] || c.rank}${suitSvg(c.suit, 13)}</span>`).join(' ');
 
     const details = `
       <div style="margin-top:15px;border-top:1px solid rgba(255,255,255,0.15);padding-top:15px;text-align:left;font-family:monospace;font-size:12px;color:#a0aab8;">

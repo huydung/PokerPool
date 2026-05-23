@@ -10,17 +10,21 @@ export class AimingControls {
    * @param {HTMLCanvasElement} canvas The Pixi.js renderer canvas element
    * @param {PhysicsEngine} physics The modular PhysicsEngine instance
    * @param {Object} config The centralized CONFIG object
+   * @param {CanvasRenderer|null} renderer Optional renderer reference for Pixi UI elements
    */
-  constructor(canvas, physics, config = CONFIG) {
+  constructor(canvas, physics, config = CONFIG, renderer = null) {
     this.canvas = canvas;
     this.physics = physics;
     this.config = config;
+    this.renderer = renderer; // Used to show/hide Pixi-native UI (e.g. BIH confirm button)
 
     // Interaction states
-    this.isAiming = false;
-    this.isLocked = false; // Aiming angle lock-in state
-    this.isDraggingSlider = false;
-    this.startDragPos = { x: 0, y: 0 };
+    this.isAiming = false;             // true while pointer is held for aim-rotation drag
+    this.isDraggingSlider = false;     // true while pointer is dragging the power slider
+    this._dragStart = null;            // canvas-space anchor for the current aim drag
+    this._initialStrokeDir = null;     // strokeDir snapshot captured at drag start
+    this._sliderDragStartY = 0;        // Y coordinate where slider drag began
+    this._sliderDragStartPower = 0;    // powerRatio at the moment slider drag began
     this.currentMousePos = { x: 512, y: 338 }; // Centered default
     this.powerRatio = 0.0;
     this.strokeDir = { x: 1, y: 0 }; // Default pointing right
@@ -44,11 +48,30 @@ export class AimingControls {
   set hasBallInHand(val) {
     this._hasBallInHand = val;
     if (val) {
+      // If the cue ball was parked off-canvas after a scratch (physics parks it at
+      // x=-500 so it stays invisible while other balls finish rolling), move it back
+      // onto the table now that all balls have stopped and BIH is officially starting.
+      const cueBall = this.physics?.cueBall;
+      if (cueBall) {
+        const t = this.config.table;
+        const onTable = cueBall.position.x >= t.xCenter - t.width / 2 &&
+                        cueBall.position.x <= t.xCenter + t.width / 2 &&
+                        cueBall.position.y >= t.yCenter - t.height / 2 &&
+                        cueBall.position.y <= t.yCenter + t.height / 2;
+        if (!onTable) {
+          // Default starting position: head string centre (or just inside kitchen for break)
+          const headStringX = t.xCenter - t.width / 4;
+          const startX = this.isBreakPlacement ? headStringX - 30 : headStringX;
+          Matter.Body.setPosition(cueBall, { x: startX, y: t.yCenter });
+          Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
+          Matter.Body.setAngularVelocity(cueBall, 0);
+        }
+      }
+
       this.showBallInHandUI();
       // Disable cue ball physical collisions with other balls during Ball-in-Hand.
       // Category 0x0001 = balls, 0x0002 = cushions/static.
       // By setting mask to 0x0000 we make the cue ball a ghost — no physical contacts.
-      const cueBall = this.physics?.cueBall;
       if (cueBall) {
         // Save original filter so we can restore it precisely
         this._savedCollisionFilter = { ...cueBall.collisionFilter };
@@ -72,29 +95,34 @@ export class AimingControls {
   showBallInHandUI() {
     this.hideBallInHandUI(); // Safeguard: remove any existing one first
 
-    const container = document.getElementById('game-container') || document.body;
+    const btnLabel = this.isBreakPlacement ? 'CONFIRM BREAK POSITION' : 'CONFIRM POSITION';
 
+    // Prefer the Pixi-native button (scales perfectly with canvas)
+    if (this.renderer) {
+      this.renderer.showBallInHandConfirmButton(btnLabel, () => this.confirmCueBallPlacement());
+      return;
+    }
+
+    // HTML fallback (used only when no renderer reference is available)
+    const container = document.getElementById('game-container') || document.body;
     const ui = document.createElement('div');
     ui.id = 'ball-in-hand-ui';
     ui.className = 'ball-in-hand-hud-overlay';
-    const btnLabel = this.isBreakPlacement ? 'CONFIRM BREAK POSITION' : 'CONFIRM POSITION';
-    ui.innerHTML = `
-      <button id="confirm-placement-btn" class="hud-confirm-btn">${btnLabel}</button>
-    `;
+    ui.innerHTML = `<button id="confirm-placement-btn" class="hud-confirm-btn">${btnLabel}</button>`;
     container.appendChild(ui);
-    
     const confirmBtn = ui.querySelector('#confirm-placement-btn');
     confirmBtn.addEventListener('click', (e) => {
-      e.stopPropagation(); // Stop event bubbling to canvas
+      e.stopPropagation();
       this.confirmCueBallPlacement();
     });
   }
 
   hideBallInHandUI() {
-    const existing = document.getElementById('ball-in-hand-ui');
-    if (existing) {
-      existing.remove();
+    if (this.renderer) {
+      this.renderer.hideBallInHandConfirmButton();
     }
+    const existing = document.getElementById('ball-in-hand-ui');
+    if (existing) existing.remove();
   }
 
   /**
@@ -137,15 +165,19 @@ export class AimingControls {
     const valid = this.isValidCueBallPosition(clampedX, clampedY);
     this.cueBallPositionValid = valid;
 
-    // Update confirm button state
-    const btn = document.getElementById('confirm-placement-btn');
-    if (btn) {
-      btn.disabled = !valid;
-      btn.textContent = valid ? 'CONFIRM POSITION' : '⚠ OVERLAPPING BALL';
-      btn.style.background = valid
-        ? 'linear-gradient(135deg, #00e5ff 0%, #0077aa 100%)'
-        : 'linear-gradient(135deg, #ff5252 0%, #b71c1c 100%)';
-      btn.style.cursor = valid ? 'pointer' : 'not-allowed';
+    // Update confirm button state (Pixi-native or HTML fallback)
+    if (this.renderer) {
+      this.renderer.updateBallInHandButton(valid);
+    } else {
+      const btn = document.getElementById('confirm-placement-btn');
+      if (btn) {
+        btn.disabled = !valid;
+        btn.textContent = valid ? 'CONFIRM POSITION' : '⚠ OVERLAPPING BALL';
+        btn.style.background = valid
+          ? 'linear-gradient(135deg, #00e5ff 0%, #0077aa 100%)'
+          : 'linear-gradient(135deg, #ff5252 0%, #b71c1c 100%)';
+        btn.style.cursor = valid ? 'pointer' : 'not-allowed';
+      }
     }
   }
 
@@ -206,244 +238,325 @@ export class AimingControls {
   }
 
   /**
-   * Helper to check if coordinates are within the vertical slider interaction area.
-   * Uses a highly generous bounding box on the left margin (especially when locked)
-   * to eliminate accidental aiming resets due to quick clicks or fat-fingered touches.
-   * @param {number} x Canvas X coordinate
-   * @param {number} y Canvas Y coordinate
-   * @returns {boolean} True if coordinates are inside the slider bounds
-   */
-  isInsideSlider(x, y) {
-    const s = this.config.slider;
-    if (!s) return false;
-    
-    // When aim is locked, widen the slider hit-box considerably so players can
-    // drag power without missing the narrow track.
-    const isLocked = this.isLocked;
-    const horizontalBuffer = isLocked ? 80 : 30;
-    // When locked, extend vertical buffer to cover the entire canvas height to avoid accidental Y-axis misses.
-    const verticalBuffer = isLocked ? 200 : 20;
-
-    return (
-      x >= 0 &&
-      x <= s.x + s.width + horizontalBuffer &&
-      y >= s.y - verticalBuffer &&
-      y <= s.y + s.height + verticalBuffer
-    );
-  }
-
-  /**
    * Binds mouse and touch events to the canvas.
+   *
+   * NEW MECHANIC:
+   *   • Drag anywhere (except slider) → rotates aim direction relative to starting angle.
+   *     A full table-width of horizontal drag = ±30° rotation.
+   *     Releasing the drag LOCKS the aim direction — does NOT fire.
+   *   • Power slider (left edge) → drag up/down sets powerRatio.
+   *     Releasing the slider FIRES the shot.
+   *   • On shot-end, aim auto-snaps to the nearest object ball via aimAtNearestBall().
    */
   initEvents() {
-    // Canvas pointerdown (either clicks on the slider or aims on the table)
+    // ── POINTER DOWN ──────────────────────────────────────────────────────────
     this.canvas.addEventListener('pointerdown', (e) => {
       if (!this.enabled || !this.physics.cueBall) return;
-
-      // Safety check to ignore simulated clicks/taps immediately after placing the ball
       if (this.justPlacedBall) return;
+      if (this.activePointerId !== undefined) return; // multi-touch safety
 
-      // Multi-touch safety: If we are already active with a pointer, ignore any new pointerdowns!
-      if (this.activePointerId !== undefined) return;
+      const { x, y } = this.getCanvasCoordinates(e.clientX, e.clientY);
+      this.currentMousePos = { x, y };
 
-      const coords = this.getCanvasCoordinates(e.clientX, e.clientY);
-      const mouseX = coords.x;
-      const mouseY = coords.y;
-
-      this.currentMousePos = { x: mouseX, y: mouseY };
-
-      // Ball-in-Hand drag-to-place handler
+      // ── Ball-in-Hand placement ──────────────────────────────────────────────
       if (this.hasBallInHand) {
-        // Gutter/slider safety: ignore if touching left of the table felt
-        if (mouseX < this.config.table.xCenter - this.config.table.width / 2) {
-          return;
-        }
-
-        // Ensure they touched inside the table felt area (below HUD)
-        if (mouseY > 100) {
+        if (x < this.config.table.xCenter - this.config.table.width / 2) return;
+        if (y > 100) {
           this.isPlacingCueBall = true;
           this.activePointerId = e.pointerId;
-          this._placeCueBallAt(mouseX, mouseY);
+          this._placeCueBallAt(x, y);
         }
-        return; // Complete lockout: don't allow falling through to aiming / slider while hasBallInHand is active
+        return;
       }
 
-      // Check if all balls are stopped before allowing aim adjustments or shots
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) return;
+      if (y < 100) return; // ignore HUD strip
 
-      // Case A: Interaction inside the vertical power slider zone
-      if (this.isInsideSlider(mouseX, mouseY)) {
+      // ── Power slider ────────────────────────────────────────────────────────
+      if (this._isInsideSlider(x, y)) {
         this.isDraggingSlider = true;
-        this.activePointerId = e.pointerId; // Capture this pointer
-        this.powerRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
-      } else {
-        // Gutter Safety Guard: clicks left of the table felt (slider/margin area) must not
-        // trigger aiming resets or toggles.
-        if (mouseX < this.config.table.xCenter - this.config.table.width / 2) {
-          return;
-        }
-
-        // Case B: Table tap/drag interaction
-        this.isDraggingSlider = false;
-        
-        if (e.pointerType === 'touch') {
-          // Mobile/Touch device: start table aiming, unlock angle for current gesture
-          this.isAiming = true;
-          this.isLocked = false; 
-          this.activePointerId = e.pointerId; // Capture this pointer
-          const cueBall = this.physics.cueBall;
-          const dx = mouseX - cueBall.position.x;
-          const dy = mouseY - cueBall.position.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 0.1) {
-            // Drag the cue handle → shot fires in the opposite direction
-            this.strokeDir = {
-              x: -dx / dist,
-              y: -dy / dist
-            };
-          }
-        } else {
-          // PC/Mouse device: Click on table toggles lock state
-          this.isLocked = !this.isLocked;
-
-          // If newly unlocked, snap aiming direction instantly opposite to mouse click coordinate
-          if (!this.isLocked) {
-            const cueBall = this.physics.cueBall;
-            const dx = mouseX - cueBall.position.x;
-            const dy = mouseY - cueBall.position.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > 0.1) {
-              this.strokeDir = {
-                x: -dx / dist,
-                y: -dy / dist
-              };
-            }
-          }
-        }
+        this.activePointerId = e.pointerId;
+        // Record start state — do NOT jump power to the tap position.
+        // The knob follows from its current position as you drag.
+        this._sliderDragStartY = y;
+        this._sliderDragStartPower = this.powerRatio;
+        return;
       }
+
+      // ── Aim rotation drag ───────────────────────────────────────────────────
+      this._dragStart = { x, y };
+      this._initialStrokeDir = { ...this.strokeDir };
+      this.isAiming = true;
+      this.activePointerId = e.pointerId;
     });
 
-    // Canvas pointermove (aim or slide power)
+    // ── POINTER MOVE ──────────────────────────────────────────────────────────
     this.canvas.addEventListener('pointermove', (e) => {
       if (!this.enabled || !this.physics.cueBall) return;
-
-      // Multi-touch safety: if we are tracking a specific pointer, ignore others
       if (this.activePointerId !== undefined && e.pointerId !== this.activePointerId) return;
 
-      const coords = this.getCanvasCoordinates(e.clientX, e.clientY);
-      const mouseX = coords.x;
-      const mouseY = coords.y;
-
-      this.currentMousePos = { x: mouseX, y: mouseY };
+      const { x, y } = this.getCanvasCoordinates(e.clientX, e.clientY);
+      this.currentMousePos = { x, y };
 
       if (this.hasBallInHand) {
-        if (this.isPlacingCueBall) {
-          this._placeCueBallAt(mouseX, mouseY);
-        }
-        return; // Lock out aiming pointer movements during Ball-In-Hand
+        if (this.isPlacingCueBall) this._placeCueBallAt(x, y);
+        return;
       }
 
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) return;
 
       if (this.isDraggingSlider) {
-        // Sliding: update power based on vertical Y displacement
-        this.powerRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
-      } else {
-        // Rotating: update vector direction only if pointer is outside the slider zones
-        if (!this.isInsideSlider(mouseX, mouseY)) {
-          const cueBall = this.physics.cueBall;
-          const dx = mouseX - cueBall.position.x;
-          const dy = mouseY - cueBall.position.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          
-          if (e.pointerType === 'touch') {
-            // Touch device: only rotate while actively aiming (finger dragged on table)
-            if (this.isAiming && dist > 0.1) {
-              this.strokeDir = {
-                x: -dx / dist,
-                y: -dy / dist
-              };
-            }
-          } else {
-            // Mouse device: only rotate if angle is UNLOCKED
-            if (!this.isLocked && dist > 0.1) {
-              this.strokeDir = {
-                x: -dx / dist,
-                y: -dy / dist
-              };
-            }
-          }
-        }
+        this._updatePowerFromSliderDelta(y);
+        return;
       }
+
+      if (!this.isAiming || !this._dragStart || !this._initialStrokeDir) return;
+
+      // Aim rotation: world-space formula that maps drag direction to rotation direction
+      // consistently regardless of where the cue ball or aim line is pointing.
+      //   • Left→Right drag  (dx > 0, dy ≈ 0): angle < 0 → CCW  ✓
+      //   • Right→Left drag  (dx < 0, dy ≈ 0): angle > 0 → CW   ✓
+      //   • Bottom→Top drag  (dy < 0, dx ≈ 0): angle < 0 → CCW  ✓  (−dy > 0)
+      //   • Top→Bottom drag  (dy > 0, dx ≈ 0): angle > 0 → CW   ✓  (−dy < 0)
+      // Sensitivity: a drag equal to the full table width rotates the aim 90°.
+      const dx = x - this._dragStart.x;
+      const dy = y - this._dragStart.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 2) return; // ignore micro-jitter
+      const ix = this._initialStrokeDir.x;
+      const iy = this._initialStrokeDir.y;
+      const angle = (dx - dy) * (Math.PI / 2) / this.config.table.width;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      this.strokeDir = {
+        x: ix * cos - iy * sin,
+        y: ix * sin + iy * cos
+      };
     });
 
-    // Window level pointerup (release to fire shot or cancel)
+    // ── POINTER UP ────────────────────────────────────────────────────────────
     window.addEventListener('pointerup', (e) => {
-      // Multi-touch safety: only handle pointerup for our active pointer if tracked
       if (this.activePointerId !== undefined && e.pointerId !== this.activePointerId) return;
-
-      // Reset pointer tracking
       this.activePointerId = undefined;
 
       if (this.hasBallInHand) {
-        if (this.isPlacingCueBall) {
-          this.isPlacingCueBall = false;
-        }
-        return; // Maintain Ball-In-Hand state until explicitly confirmed via UI button click
+        if (this.isPlacingCueBall) this.isPlacingCueBall = false;
+        return;
       }
 
-      // For mobile touch, releasing finger off table auto-locks aiming angle
-      if (e.pointerType === 'touch' && this.isAiming) {
+      // Aim drag release → lock direction, do NOT fire
+      if (this.isAiming) {
         this.isAiming = false;
-        this.isLocked = true;
+        this._dragStart = null;
+        this._initialStrokeDir = null;
+        return;
       }
 
-      if (!this.enabled || !this.physics.cueBall || !this.isDraggingSlider) {
+      // Slider release → fire shot
+      if (this.isDraggingSlider) {
         this.isDraggingSlider = false;
-        this.powerRatio = 0.0;
-        return;
+
+        if (!this.enabled || !this.physics.cueBall) {
+          this.powerRatio = 0;
+          return;
+        }
+
+        const allStopped = this.physics.areAllBallsStopped();
+        if (!allStopped) {
+          this.powerRatio = 0;
+          return;
+        }
+
+        const currentPower = this.powerRatio;
+        this.powerRatio = 0;
+
+        if (currentPower >= this.config.cue.minPower) {
+          const maxShotSpeed = this.physics.isBreakShot
+            ? this.config.ball.maxSpeed
+            : this.config.ball.maxSpeed / 2;
+          const minShotSpeed = 0.8;
+
+          const velocityMagnitude = minShotSpeed + currentPower * (maxShotSpeed - minShotSpeed);
+          this.physics.applyCueStroke({
+            x: this.strokeDir.x * velocityMagnitude,
+            y: this.strokeDir.y * velocityMagnitude
+          });
+          this.physics.isBreakShot = false;
+        }
       }
-
-      this.isDraggingSlider = false;
-
-      // Only trigger shot if all balls are stopped
-      const allStopped = this.physics.areAllBallsStopped();
-      if (!allStopped) {
-        this.powerRatio = 0.0;
-        return;
-      }
-
-      const currentPower = this.powerRatio;
-
-      // Release triggers shot if power ratio is greater than minPower
-      if (currentPower >= this.config.cue.minPower) {
-        // Break shots get 2x speed cap for a satisfying rack scatter.
-        const maxShotSpeed = this.physics.isBreakShot
-          ? this.config.ball.maxSpeed
-          : this.config.ball.maxSpeed / 2;
-        const minShotSpeed = 0.8;
-        
-        // Linearly interpolate cue ball velocity magnitude
-        const velocityMagnitude = minShotSpeed + currentPower * (maxShotSpeed - minShotSpeed);
-
-        const velocityVector = {
-          x: this.strokeDir.x * velocityMagnitude,
-          y: this.strokeDir.y * velocityMagnitude
-        };
-
-        this.physics.applyCueStroke(velocityVector);
-        
-        // Break shot has been completed
-        this.physics.isBreakShot = false;
-
-        // Fired shot successfully: reset lock status for next round
-        this.isLocked = false;
-      }
-
-      this.powerRatio = 0.0;
     });
+  }
+
+  /**
+   * Returns true when (x, y) falls within the power slider hit area (with touch buffer).
+   */
+  _isInsideSlider(x, y) {
+    const s = this.config.slider;
+    const buf = s.touchBuffer ?? 20;
+    return x >= s.x - buf && x <= s.x + s.width + buf &&
+           y >= s.y - buf && y <= s.y + s.height + buf;
+  }
+
+  /**
+   * Updates powerRatio using a DELTA from the drag-start position.
+   * This is "drag-and-drop" behaviour: the knob follows the finger from wherever
+   * it currently sits — there is no jump to the tap position.
+   *
+   * The track height in the renderer is (slider.height - 40), so we use that
+   * same value for the mapping so dragging end-to-end gives full 0→1 travel.
+   */
+  _updatePowerFromSliderDelta(currentY) {
+    const s = this.config.slider;
+    const trackHeight = s.height - 40; // mirrors renderer: trackY = s.y+20, trackH = s.height-40
+    const deltaRatio = (currentY - this._sliderDragStartY) / trackHeight;
+    this.powerRatio = Math.max(0, Math.min(1, this._sliderDragStartPower + deltaRatio));
+  }
+
+  /**
+   * Snaps aim toward the object ball that has the most unobstructed path to a pocket.
+   * For each (target ball, pocket) pair the method checks:
+   *   1. Is the target→pocket corridor free of other balls?
+   *   2. Is the cue→ghost-ball corridor free of other balls?
+   * Candidate shots are scored by combined travel distance (shorter = better).
+   * Falls back to nearest-ball aim when all paths are fully blocked.
+   */
+  aimAtBestShot() {
+    const cueBall = this.physics?.cueBall;
+    if (!cueBall) return;
+    const targets = this.physics?.targetBalls || [];
+    if (targets.length === 0) return;
+
+    const R = this.config.ball.radius;
+    const { xCenter, yCenter, width, height } = this.config.table;
+    const { sideOffset } = this.config.pocket;
+    const hw = width / 2, hh = height / 2;
+    const pocketPositions = [
+      { x: xCenter - hw,           y: yCenter - hh           }, // TL
+      { x: xCenter + hw,           y: yCenter - hh           }, // TR
+      { x: xCenter - hw,           y: yCenter + hh           }, // BL
+      { x: xCenter + hw,           y: yCenter + hh           }, // BR
+      { x: xCenter,                y: yCenter - hh - sideOffset }, // Side-top
+      { x: xCenter,                y: yCenter + hh + sideOffset }, // Side-bottom
+    ];
+
+    const cx = cueBall.position.x;
+    const cy = cueBall.position.y;
+
+    let bestDir   = null;
+    let bestScore = -Infinity;
+
+    for (const target of targets) {
+      const tx = target.position.x;
+      const ty = target.position.y;
+
+      for (const pocket of pocketPositions) {
+        // Direction from target ball toward pocket
+        const dpx = pocket.x - tx;
+        const dpy = pocket.y - ty;
+        const dpDist = Math.sqrt(dpx * dpx + dpy * dpy);
+        if (dpDist < 1) continue;
+        const dpDirX = dpx / dpDist;
+        const dpDirY = dpy / dpDist;
+
+        // Ghost-ball contact point (where cue ball must reach to send target to pocket)
+        const ghostX = tx - dpDirX * R * 2;
+        const ghostY = ty - dpDirY * R * 2;
+
+        // Direction from cue ball to ghost position
+        const cgx = ghostX - cx;
+        const cgy = ghostY - cy;
+        const cgDist = Math.sqrt(cgx * cgx + cgy * cgy);
+        if (cgDist < 1) continue;
+
+        // Verify target→pocket lane is clear (ignore the target ball itself)
+        if (!this._isPathClear({ x: tx, y: ty }, pocket,
+                                targets.filter(b => b !== target), R)) continue;
+
+        // Verify cue→ghost lane is clear (all target balls are potential obstacles)
+        if (!this._isPathClear({ x: cx, y: cy }, { x: ghostX, y: ghostY },
+                                targets, R)) continue;
+
+        // Score: prefer short cue-to-ghost distance, slightly prefer short pocket distance
+        const score = -(cgDist * 0.60 + dpDist * 0.40);
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestDir   = { x: cgx / cgDist, y: cgy / cgDist };
+        }
+      }
+    }
+
+    if (bestDir) {
+      this.strokeDir = bestDir;
+    } else {
+      // All shot paths blocked — fall back to nearest ball
+      this.aimAtNearestBall();
+    }
+  }
+
+  /**
+   * Checks whether the straight-line segment from `from` to `to` is clear of
+   * obstacles.  An obstacle blocks the path if its centre lies within 2×ballRadius
+   * of the segment.
+   *
+   * @param {{x:number,y:number}} from   Start point
+   * @param {{x:number,y:number}} to     End point
+   * @param {Array<Matter.Body>}  obstacles  Bodies to test against
+   * @param {number}              radius     Ball radius
+   * @returns {boolean} true = no obstacle in the way
+   */
+  _isPathClear(from, to, obstacles, radius) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) return true;
+    const ux = dx / dist;
+    const uy = dy / dist;
+
+    for (const obs of obstacles) {
+      const ox = obs.position.x - from.x;
+      const oy = obs.position.y - from.y;
+      const proj = ox * ux + oy * uy;
+      if (proj < 0 || proj > dist) continue; // outside the segment
+      const perpX = ox - proj * ux;
+      const perpY = oy - proj * uy;
+      if (Math.sqrt(perpX * perpX + perpY * perpY) < radius * 2) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Snaps the aim direction toward the nearest object ball.
+   * Used as a fallback by aimAtBestShot() when all pocket paths are blocked.
+   */
+  aimAtNearestBall() {
+    const cueBall = this.physics?.cueBall;
+    if (!cueBall) return;
+    const targets = this.physics?.targetBalls || [];
+    if (targets.length === 0) return;
+
+    let nearestDist = Infinity;
+    let nearest = null;
+    for (const ball of targets) {
+      const dx = ball.position.x - cueBall.position.x;
+      const dy = ball.position.y - cueBall.position.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = ball;
+      }
+    }
+
+    if (nearest) {
+      const dx = nearest.position.x - cueBall.position.x;
+      const dy = nearest.position.y - cueBall.position.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 0) {
+        this.strokeDir = { x: dx / d, y: dy / d };
+      }
+    }
   }
 
   /**
@@ -454,11 +567,11 @@ export class AimingControls {
     if (!this.enabled) return null;
     if (this.hasBallInHand) return null;
 
-    // Show aiming line automatically if all balls are stopped (pre-shot continuous hover-aiming)
+    // Show aiming line whenever all balls are stopped
     const allStopped = this.physics.areAllBallsStopped();
     if (!allStopped || !this.physics.cueBall) return null;
 
-    // If dragging slider, hide visual guides if power is below cancelPower threshold (pulling back to cancel)
+    // Suppress aim visual only while dragging slider with near-zero power
     if (this.isDraggingSlider && this.powerRatio < this.config.cue.cancelPower) {
       return null;
     }
@@ -576,7 +689,6 @@ export class AimingControls {
 
     return {
       isAiming: this.isAiming,
-      isLocked: this.isLocked,
       startX,
       startY,
       strokeDir: D,

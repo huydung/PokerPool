@@ -40,7 +40,8 @@ async function initSandbox() {
   renderer.createBallViews(physics.cueBall, physics.targetBalls);
 
   // 4. Attach interactive mouse/touch cue aiming controls
-  const controls = new AimingControls(renderer.app.canvas, physics, CONFIG);
+  // Pass renderer so AimingControls can show Pixi-native UI (BIH confirm button)
+  const controls = new AimingControls(renderer.app.canvas, physics, CONFIG, renderer);
 
   // Wire controls back into physics so physics.update() can check BIH state
   physics.controls = controls;
@@ -70,7 +71,7 @@ async function initSandbox() {
     const aimData = controls.getAimData();
     renderer.drawAimLine(aimData);
 
-    // Step D: Render the beautiful glassmorphic power slider on the left edge
+    // Step D: Render the power indicator slider (driven by slider drag)
     renderer.drawPowerSlider(controls.isDraggingSlider, controls.powerRatio);
 
     // Step E: Manage shot lifecycle turn-transitions and break evaluations
@@ -80,6 +81,8 @@ async function initSandbox() {
       game.handleShotStart();
     } else if (isShotActive && allStopped) {
       isShotActive = false;
+      // Auto-aim toward the ball with the clearest path to a pocket after every shot
+      controls.aimAtBestShot();
       game.handleShotEnd(physics);
     }
   });

@@ -21,15 +21,15 @@ export const CONFIG = {
   
   table: {
     /** @type {number} Width of the play area inside the cushions (2:1 ratio) */
-    width: 600,
+    width: 800,
     /** @type {number} Height of the play area inside the cushions (2:1 ratio) */
-    height: 300,
-    /** @type {number} Center coordinate along X-axis */
-    xCenter: 512,
-    /** @type {number} Center coordinate along Y-axis (offset down to leave room for HUD) */
-    yCenter: 338,
+    height: 400,
+    /** @type {number} Center coordinate along X-axis (shifted right to balance the left slider) */
+    xCenter: 540,
+    /** @type {number} Center coordinate along Y-axis (vertically centred in the space below the HUD) */
+    yCenter: 330,
     /** @type {number} Thickness of the rails in pixels */
-    railWidth: 22,
+    railWidth: 24,
     /** @type {number} Coefficient of restitution for rails (bounce bounciness, 0 to 1) */
     railRestitution: 0.8,
     /** @type {number} Alias for railRestitution to satisfy TDD test specifications */
@@ -42,9 +42,9 @@ export const CONFIG = {
   
   pocket: {
     /** @type {number} Radius of the pocket sensors in pixels */
-    radius: 22,
+    radius: 26,
     /** @type {number} Collision buffer/offset to place side pockets slightly outward */
-    sideOffset: 14
+    sideOffset: 15
   },
 
   // ==========================================
@@ -89,6 +89,8 @@ export const CONFIG = {
     visualOffset: 25,
     /** @type {number} Additional pullback visual spacing at max power */
     pullBackDistance: 80,
+    /** @type {number} Canvas pixels of drag needed to reach full power (1.0 ratio) */
+    maxDragDistance: 180,
     /** @type {number} Maximum force multiplier applied during a break shot */
     breakForceMultiplier: 2.0
   },
@@ -100,12 +102,12 @@ export const CONFIG = {
   slider: {
     /** @type {number} X position on canvas (left edge layout space) */
     x: 22,
-    /** @type {number} Y starting position on canvas (aligned with active felt Y) */
-    y: 188,
+    /** @type {number} Y starting position on canvas (aligned with table top: yCenter - height/2) */
+    y: 130,
     /** @type {number} Width of the slider background panel */
     width: 38,
-    /** @type {number} Height of the slider background panel */
-    height: 300,
+    /** @type {number} Height of the slider background panel (matches table height: 400) */
+    height: 400,
     /** @type {number} Pointer interaction touch padding buffer */
     touchBuffer: 20
   },
@@ -192,15 +194,15 @@ export const CONFIG = {
     minBreakCushionContacts: 4,
     /** @type {Array<{x: number, y: number}>} 9-point respawn matrix coordinates */
     respawnMatrix: [
-      { x: 362, y: 263 },
-      { x: 362, y: 338 },
-      { x: 362, y: 413 },
-      { x: 512, y: 287 },
-      { x: 512, y: 338 },
-      { x: 512, y: 389 },
-      { x: 662, y: 263 },
-      { x: 662, y: 338 },
-      { x: 662, y: 413 }
+      { x: 340, y: 230 },
+      { x: 340, y: 330 },
+      { x: 340, y: 430 },
+      { x: 540, y: 255 },
+      { x: 540, y: 330 },
+      { x: 540, y: 405 },
+      { x: 740, y: 230 },
+      { x: 740, y: 330 },
+      { x: 740, y: 430 }
     ]
   }
 };

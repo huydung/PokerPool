@@ -297,14 +297,22 @@ export class PhysicsEngine {
   }
 
   /**
-   * Handles pocket sensory overlaps: resets the cue ball on scratch or removes target balls.
+   * Handles pocket sensory overlaps: parks the cue ball off-canvas on scratch
+   * (so it stays invisible while other balls finish moving), or removes target balls.
+   *
+   * For scratch: the ball is NOT teleported to the head string immediately because
+   * other balls may still be in motion.  The game engine calls hasBallInHand = true
+   * inside handleShotEnd (which fires only after areAllBallsStopped()), and the
+   * controls setter then repositions the cue ball to a sensible BIH starting point.
+   *
    * @param {Matter.Body} ball The dynamic ball body
    */
   handlePocketOverlap(ball) {
     if (ball.label === 'cue_ball') {
-      // Scratch: reset cue ball to head string center
-      const headStringX = this.config.table.xCenter - this.config.table.width / 4;
-      Matter.Body.setPosition(ball, { x: headStringX, y: this.config.table.yCenter });
+      // Park the cue ball well off-canvas so it stays invisible while target balls
+      // continue rolling.  areAllBallsStopped() still works correctly because the
+      // body still exists in the world with velocity = 0.
+      Matter.Body.setPosition(ball, { x: -500, y: -500 });
       Matter.Body.setVelocity(ball, { x: 0, y: 0 });
       Matter.Body.setAngularVelocity(ball, 0);
     } else {

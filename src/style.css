@@ -1091,14 +1091,26 @@ canvas {
   color: #050a14;
   box-shadow: 0 3px 12px rgba(0, 230, 118, 0.3);
 }
-.discard-btn-add:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.discard-btn-add:not(:disabled):hover { filter: brightness(1.1); transform: translateY(-1px); }
+.discard-btn-add:disabled {
+  background: rgba(30, 40, 60, 0.6);
+  color: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+  cursor: not-allowed;
+}
 
 .discard-btn-token {
   background: linear-gradient(135deg, #ff6f00 0%, #ff8f00 100%);
   color: #fff;
   box-shadow: 0 3px 12px rgba(255, 111, 0, 0.3);
 }
-.discard-btn-token:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.discard-btn-token:not(:disabled):hover { filter: brightness(1.1); transform: translateY(-1px); }
+.discard-btn-token:disabled {
+  background: rgba(30, 40, 60, 0.6);
+  color: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+  cursor: not-allowed;
+}
 
 .discard-btn-skip {
   background: rgba(50, 60, 80, 0.7);
