@@ -296,6 +296,14 @@ export class AimingControls {
       const { x, y } = this.getCanvasCoordinates(e.clientX, e.clientY);
       this.currentMousePos = { x, y };
 
+      // ── Right panel guard — MUST be first: applies in ALL states (BIH, aim, etc.)
+      // The renderer owns a native DOM listener that handles ?, i, and CHEAT clicks.
+      const rightPanelLeft = this.config.canvas.width - 56;
+      if (x >= rightPanelLeft) {
+        console.log(`[CONTROLS] Click in right panel area (x=${x.toFixed(0)}) — deferring to renderer`);
+        return;
+      }
+
       // ── Ball-in-Hand placement ──────────────────────────────────────────────
       if (this.hasBallInHand) {
         if (x < this.config.table.xCenter - this.config.table.width / 2) return;
@@ -310,16 +318,6 @@ export class AimingControls {
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) return;
       if (y < 100) return; // ignore HUD strip
-
-      // ── Right panel area — let Pixi handle its own interactive buttons ──────
-      // Any click at x ≥ canvas.width-56 belongs to the right panel (?, i, CHEAT).
-      // Returning here prevents the DOM pointerdown from starting an aim drag that
-      // would fight with Pixi's own button pointerdown event on the same canvas.
-      const rightPanelLeft = this.config.canvas.width - 56;
-      if (x >= rightPanelLeft) {
-        console.log(`[CONTROLS] Click in right panel area (x=${x.toFixed(0)}) — deferring to Pixi`);
-        return;
-      }
 
       // ── Cheat mode: ball / pocket click selection ──────────────────────────
       if (this.cheatEnabled) {

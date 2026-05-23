@@ -783,11 +783,9 @@ export class CanvasRenderer {
     const rp = this.rightPanelContainer;
     // NO background rectangle — panel blends with the canvas background colour.
 
-    // ── Helper: circular icon button ──────────────────────────────────────
-    const makeIcon = (symbol, yPos, borderColor, onClick) => {
+    // ── Helper: circular icon button (visual only — events handled by native DOM listener)
+    const makeIcon = (symbol, yPos, borderColor) => {
       const btn = new Container();
-      btn.eventMode = 'static';
-      btn.cursor = 'pointer';
       btn.x = cx;
       btn.y = yPos;
 
@@ -809,22 +807,14 @@ export class CanvasRenderer {
       label.anchor.set(0.5);
       btn.addChild(label);
 
-      btn.on('pointerover', () => { circ.tint = 0xdddddd; });
-      btn.on('pointerout',  () => { circ.tint = 0xffffff; });
-      btn.on('pointerdown', (e) => { e.stopPropagation(); onClick(); });
       rp.addChild(btn);
-      return btn;
+      return { btn, circ };
     };
 
     // "?" — How to Play
-    makeIcon('?', yTop + 20, 0x00e5ff, () => {
-      if (this.onRulesRequest) this.onRulesRequest();
-    });
-
+    const { circ: qCirc } = makeIcon('?', yTop + 20, 0x00e5ff);
     // "i" — Credits
-    makeIcon('i', yTop + 62, 0x7ecaff, () => {
-      window.open('https://huydung.com', '_blank');
-    });
+    const { circ: iCirc } = makeIcon('i', yTop + 62, 0x7ecaff);
 
     // ── Thin separator ────────────────────────────────────────────────────
     const sep = new Graphics();
@@ -832,10 +822,9 @@ export class CanvasRenderer {
     sep.stroke({ color: 0x1e3a5f, width: 1 });
     rp.addChild(sep);
 
-    // ── CHEAT toggle pill ─────────────────────────────────────────────────
+    // ── CHEAT toggle pill (visual only) ──────────────────────────────────
     const toggleY = yTop + 120;
 
-    // Label above
     const cheatLabel = new Text({
       text: 'CHEAT',
       style: new TextStyle({
@@ -851,19 +840,15 @@ export class CanvasRenderer {
     cheatLabel.y = toggleY - 14;
     rp.addChild(cheatLabel);
 
-    // Pill container
     const toggleBtn = new Container();
-    toggleBtn.eventMode = 'static';
-    toggleBtn.cursor = 'pointer';
     toggleBtn.x = cx;
     toggleBtn.y = toggleY;
 
     const pill = new Graphics();
     this._cheatTogglePill = pill;
-    this._redrawCheatToggle(false); // initial off state
+    this._redrawCheatToggle(false);
     toggleBtn.addChild(pill);
 
-    // State label inside pill
     const stateText = new Text({
       text: 'OFF',
       style: new TextStyle({
@@ -879,21 +864,59 @@ export class CanvasRenderer {
     toggleBtn.addChild(stateText);
     this._cheatToggleLabel = stateText;
 
-    toggleBtn.on('pointerdown', (e) => {
-      e.stopPropagation();
-      this._cheatEnabled = !this._cheatEnabled;
-      this._redrawCheatToggle(this._cheatEnabled);
-      stateText.text = this._cheatEnabled ? 'ON' : 'OFF';
-      stateText.style.fill = this._cheatEnabled ? 0x001a00 : 0x6b8cae;
-      console.log(`[RENDERER] Cheat toggle clicked → ${this._cheatEnabled ? 'ON' : 'OFF'} (onCheatToggle wired=${!!this.onCheatToggle})`);
-      if (this.onCheatToggle) {
-        this.onCheatToggle(this._cheatEnabled);
-      } else {
-        console.warn('[RENDERER] onCheatToggle callback not wired — cheat state not propagated to game engine');
+    rp.addChild(toggleBtn);
+
+    // ── Native DOM listener — bypasses Pixi hit-testing entirely ─────────
+    // Pixi v8's Container hit-testing can silently miss clicks; a raw DOM
+    // pointerdown on the canvas with manual position math is rock-solid.
+    // controls.js already returns early for x >= rightPanelLeft, so there
+    // is no conflict with aiming or BIH placement.
+    this.app.canvas.addEventListener('pointerdown', (e) => {
+      const rect = this.app.canvas.getBoundingClientRect();
+      const scaleX = this.config.canvas.width  / rect.width;
+      const scaleY = this.config.canvas.height / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top)  * scaleY;
+
+      if (x < panelX) return; // not in the right panel strip
+
+      const dx = x - cx;
+
+      // "?" button  (radius 18 px hit zone for easy tapping)
+      if (Math.sqrt(dx * dx + (y - (yTop + 20)) ** 2) <= 18) {
+        console.log('[RENDERER] ? button clicked (native DOM)');
+        qCirc.tint = 0xdddddd;
+        setTimeout(() => { qCirc.tint = 0xffffff; }, 150);
+        if (this.onRulesRequest) this.onRulesRequest();
+        return;
+      }
+
+      // "i" button
+      if (Math.sqrt(dx * dx + (y - (yTop + 62)) ** 2) <= 18) {
+        console.log('[RENDERER] i button clicked (native DOM)');
+        iCirc.tint = 0xdddddd;
+        setTimeout(() => { iCirc.tint = 0xffffff; }, 150);
+        window.open('https://huydung.com', '_blank');
+        return;
+      }
+
+      // CHEAT toggle pill  (full pill area ± 16 px vertically)
+      if (Math.abs(y - toggleY) <= 16) {
+        this._cheatEnabled = !this._cheatEnabled;
+        this._redrawCheatToggle(this._cheatEnabled);
+        stateText.text = this._cheatEnabled ? 'ON' : 'OFF';
+        stateText.style.fill = this._cheatEnabled ? 0x001a00 : 0x6b8cae;
+        console.log(`[RENDERER] Cheat toggle (native DOM) → ${this._cheatEnabled ? 'ON' : 'OFF'} (onCheatToggle wired=${!!this.onCheatToggle})`);
+        if (this.onCheatToggle) {
+          this.onCheatToggle(this._cheatEnabled);
+        } else {
+          console.warn('[RENDERER] onCheatToggle callback not wired');
+        }
+        return;
       }
     });
-    rp.addChild(toggleBtn);
-    console.log(`[RENDERER] Right panel drawn: panelX=${panelX} cx=${cx} yTop=${yTop}`);
+
+    console.log(`[RENDERER] Right panel drawn (native DOM events): panelX=${panelX} cx=${cx} yTop=${yTop} toggleY=${toggleY}`);
   }
 
   /**
