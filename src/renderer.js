@@ -41,8 +41,8 @@ export class CanvasRenderer {
     this.activePlayerText = null;
     this.p1HUDContainer = null;
     this.p2HUDContainer = null;
-    this.p1Hearts = [];
-    this.p2Hearts = [];
+    this.p1Tokens = [];
+    this.p2Tokens = [];
     this.p1HandLabel = null;
     this.p2HandLabel = null;
 
@@ -51,10 +51,6 @@ export class CanvasRenderer {
 
     // Slider overlay graphics
     this.sliderGraphics = new Graphics();
-
-    // Callback fired when the Stand button is clicked.
-    // Set by GameEngine.startMatch — avoids renderer reaching into gameRef for this action.
-    this.onStandRequested = null;
 
     // Active Player Turn Name tracking
     this.player1Name = this.config.rules?.player1Name || 'Alice';
@@ -129,24 +125,6 @@ export class CanvasRenderer {
     ctx.fillRect(0, 0, 512, 100);
     
     return Texture.from(canvas);
-  }
-
-  /**
-   * Helper to draw a mathematically precise, beautiful, symmetrical vector heart centered at (x, y)
-   */
-  drawHeart(graphics, x, y, size) {
-    graphics.clear();
-    const halfSize = size / 2;
-
-    graphics.moveTo(x, y - size * 0.2);
-    // Left lobe
-    graphics.bezierCurveTo(x - size * 0.3, y - size * 0.6, x - halfSize, y - size * 0.3, x - halfSize, y + size * 0.05);
-    graphics.bezierCurveTo(x - halfSize, y + size * 0.35, x - size * 0.25, y + halfSize, x, y + halfSize);
-    // Right lobe
-    graphics.bezierCurveTo(x + size * 0.25, y + halfSize, x + halfSize, y + size * 0.35, x + halfSize, y + size * 0.05);
-    graphics.bezierCurveTo(x + halfSize, y - size * 0.3, x + size * 0.3, y - size * 0.6, x, y - size * 0.2);
-
-    graphics.fill({ color: 0xffffff });
   }
 
   /**
@@ -298,21 +276,18 @@ export class CanvasRenderer {
     p1Container.addChild(p1Title);
     this.p1TitleText = p1Title; // Save title reference
 
-    // Heart slots for P1 misses
+    // Token chip indicators for P1 (poker chip look: outer fill + inner dark ring)
     for (let i = 0; i < 3; i++) {
-      const heart = new Graphics();
-      this.drawHeart(heart, 0, 0, 14);
-      heart.tint = 0xff1744;
-      heart.x = 142 + i * 18;
-      heart.y = 8;
-      p1Container.addChild(heart);
-      this.p1Hearts.push(heart);
+      const dot = new Graphics();
+      dot.circle(0, 0, 6);
+      dot.fill({ color: 0x00e5ff });
+      dot.circle(0, 0, 3);
+      dot.fill({ color: 0x0a1527 });
+      dot.x = 142 + i * 17;
+      dot.y = 8;
+      p1Container.addChild(dot);
+      this.p1Tokens.push(dot);
     }
-
-    const p1Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
-    p1Score.y = 20;
-    p1Container.addChild(p1Score);
-    this.player1ScoreText = p1Score;
 
     // Render 5 empty card slot outlines for Player 1
     for (let i = 0; i < 5; i++) {
@@ -357,21 +332,18 @@ export class CanvasRenderer {
     p2Container.addChild(p2Title);
     this.p2TitleText = p2Title; // Save title reference
 
-    // Heart slots for P2 misses
+    // Token chip indicators for P2 (poker chip look: outer fill + inner dark ring)
     for (let i = 0; i < 3; i++) {
-      const heart = new Graphics();
-      this.drawHeart(heart, 0, 0, 14);
-      heart.tint = 0xff1744;
-      heart.x = 142 + i * 18;
-      heart.y = 8;
-      p2Container.addChild(heart);
-      this.p2Hearts.push(heart);
+      const dot = new Graphics();
+      dot.circle(0, 0, 6);
+      dot.fill({ color: 0xe040fb });
+      dot.circle(0, 0, 3);
+      dot.fill({ color: 0x0a1527 });
+      dot.x = 142 + i * 17;
+      dot.y = 8;
+      p2Container.addChild(dot);
+      this.p2Tokens.push(dot);
     }
-
-    const p2Score = new Text({ text: 'Hand Cards (0/5):', style: infoStyle });
-    p2Score.y = 20;
-    p2Container.addChild(p2Score);
-    this.player2ScoreText = p2Score;
 
     // Render 5 empty card slot outlines for Player 2
     for (let i = 0; i < 5; i++) {
@@ -593,12 +565,12 @@ export class CanvasRenderer {
     if (this.activePlayerText) {
       const themeColor = name === this.player1Name ? 0x00e5ff : 0xe040fb;
       
-      // Stand countdown indicator check
-      if (this.gameRef && this.gameRef.standingPlayer) {
-        const standing = this.gameRef.standingPlayer;
-        const opponent = standing === this.player1Name ? this.player2Name : this.player1Name;
-        const countdown = this.gameRef.standCountdown;
-        this.activePlayerText.text = `${standing.toUpperCase()} STOOD\n(${opponent}: ${countdown} shots left)`;
+      // Lock countdown indicator check
+      if (this.gameRef && this.gameRef.lockCountdownActive && this.gameRef.lockedPlayer) {
+        const locked = this.gameRef.lockedPlayer;
+        const opponent = locked === this.player1Name ? this.player2Name : this.player1Name;
+        const countdown = this.gameRef.lockCountdown;
+        this.activePlayerText.text = `🔒 ${locked.toUpperCase()} LOCKED\n(${opponent}: ${countdown} left)`;
       } else {
         this.activePlayerText.text = `${name.toUpperCase()}\n(Aim & Shoot)`;
       }
@@ -816,18 +788,6 @@ export class CanvasRenderer {
       color: 0x3e2723, // Warm dark tip wrap
       width: 5
     });
-
-    // B. Draw Shot Power Bar underneath the HUD
-    const strokeForceRatio = powerRatio;
-    this.aimGraphics.rect(20, 105, 1024 - 40, 6);
-    this.aimGraphics.fill({ color: 0x1c2b42 });
-    
-    this.aimGraphics.rect(20, 105, (1024 - 40) * strokeForceRatio, 6);
-    // Green -> Yellow -> Red power gradient coloring
-    let powerColor = 0x4caf50;
-    if (strokeForceRatio > 0.5) powerColor = 0xffeb3b;
-    if (strokeForceRatio > 0.85) powerColor = 0xf44336;
-    this.aimGraphics.fill({ color: powerColor });
 
     // Draw glowing ring around start coordinates (cue ball position) if locked
     if (isLocked) {
@@ -1070,7 +1030,7 @@ export class CanvasRenderer {
   /**
    * Synchronizes HUD display of player cards, consecutive miss counters, and turn active labels.
    */
-  updateHUD(hands, activePlayer, consecutiveMisses) {
+  updateHUD(hands, activePlayer, discardTokens) {
     // 1. Clear card containers
     if (this.p1CardsContainer) this.p1CardsContainer.removeChildren();
     if (this.p2CardsContainer) this.p2CardsContainer.removeChildren();
@@ -1091,17 +1051,9 @@ export class CanvasRenderer {
       });
     }
 
-    // 3. Update text headers with cards count and current misses
-    const p1Misses = consecutiveMisses[this.player1Name] || 0;
-    const p2Misses = consecutiveMisses[this.player2Name] || 0;
-
-    if (this.player1ScoreText) {
-      this.player1ScoreText.text = `Hand Cards (${p1Hand.length}/5)`;
-    }
-
-    if (this.player2ScoreText) {
-      this.player2ScoreText.text = `Hand Cards (${p2Hand.length}/5)`;
-    }
+    // 3. Update text headers with cards count and token counts
+    const p1TokenCount = discardTokens?.[this.player1Name] ?? 0;
+    const p2TokenCount = discardTokens?.[this.player2Name] ?? 0;
 
     // 3a. Update real-time poker hand label below card slots
     if (this.p1HandLabel) {
@@ -1112,53 +1064,15 @@ export class CanvasRenderer {
       this.p2HandLabel.text = this._getPartialHandLabel(p2Hand);
     }
 
-    // Update hearts indicators for misses (3-miss rule)
+    // 4. Update token dot indicators (filled = token remaining, dim = spent)
     for (let i = 0; i < 3; i++) {
-      if (this.p1Hearts[i]) {
-        if (i < 3 - p1Misses) {
-          this.p1Hearts[i].tint = 0xff1744; // Active bright red
-          this.p1Hearts[i].alpha = 1.0;
-        } else {
-          this.p1Hearts[i].tint = 0x334155; // Missed dark slate
-          this.p1Hearts[i].alpha = 0.3;
-        }
+      if (this.p1Tokens[i]) {
+        this.p1Tokens[i].tint = i < p1TokenCount ? 0x00e5ff : 0x334155;
+        this.p1Tokens[i].alpha = i < p1TokenCount ? 1.0 : 0.3;
       }
-    }
-
-    for (let i = 0; i < 3; i++) {
-      if (this.p2Hearts[i]) {
-        if (i < 3 - p2Misses) {
-          this.p2Hearts[i].tint = 0xff1744; // Active bright red
-          this.p2Hearts[i].alpha = 1.0;
-        } else {
-          this.p2Hearts[i].tint = 0x334155; // Missed dark slate
-          this.p2Hearts[i].alpha = 0.3;
-        }
-      }
-    }
-
-    // 4. Danger border — light up when active player is on their last heart
-    const maxMisses = this.config.rules?.maxConsecutiveMisses ?? 3;
-    const activeMisses = consecutiveMisses[activePlayer] || 0;
-    const inDanger = activeMisses >= maxMisses - 1; // 1 heart left
-    const gameContainer = document.getElementById('game-container');
-    if (gameContainer) {
-      if (inDanger && this.gameRef && !this.gameRef.gameEnded) {
-        gameContainer.classList.add('danger-mode');
-        // Show/update the persistent warning toast
-        let warnEl = document.getElementById('danger-warning-toast');
-        if (!warnEl) {
-          warnEl = document.createElement('div');
-          warnEl.id = 'danger-warning-toast';
-          warnEl.className = 'danger-warning-toast';
-          const gc = document.getElementById('game-container') || document.body;
-          gc.appendChild(warnEl);
-        }
-        warnEl.textContent = `⚠ ${activePlayer}: Miss this shot and you lose!`;
-      } else {
-        gameContainer.classList.remove('danger-mode');
-        const warnEl = document.getElementById('danger-warning-toast');
-        if (warnEl) warnEl.remove();
+      if (this.p2Tokens[i]) {
+        this.p2Tokens[i].tint = i < p2TokenCount ? 0xe040fb : 0x334155;
+        this.p2Tokens[i].alpha = i < p2TokenCount ? 1.0 : 0.3;
       }
     }
 

@@ -177,10 +177,10 @@ canvas {
 
 .wildcard-selector-overlay {
   position: absolute;
-  top: 0;
+  top: 17.36%;
   left: 0;
   width: 100%;
-  height: 100%;
+  height: 82.64%;
   background: rgba(6, 10, 20, 0.7);
   backdrop-filter: blur(6px);
   display: flex;
@@ -558,7 +558,7 @@ canvas {
    ========================================================================== */
 .card-swap-overlay {
   position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
+  top: 17.36%; left: 0; width: 100%; height: 82.64%;
   background: rgba(6, 10, 20, 0.85);
   backdrop-filter: blur(8px);
   display: flex; justify-content: center; align-items: center;
@@ -674,7 +674,7 @@ canvas {
    ========================================================================== */
 .rules-modal-overlay {
   position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
+  top: 17.36%; left: 0; width: 100%; height: 82.64%;
   background: rgba(4, 8, 20, 0.92);
   backdrop-filter: blur(14px);
   display: flex;
@@ -900,232 +900,270 @@ canvas {
   animation: sweepLeft 0.55s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-/* ============================================================
-   DANGER BORDER — pulsing red glow when player is on last heart
-   ============================================================ */
-#game-container.danger-mode {
-  animation: dangerPulse 0.9s ease-in-out infinite alternate;
-}
-
-@keyframes dangerPulse {
-  from {
-    box-shadow:
-      0 0 0 4px rgba(255, 30, 30, 0.85),
-      0 0 24px 8px rgba(255, 0, 0, 0.55),
-      inset 0 0 40px 10px rgba(200, 0, 0, 0.18);
-  }
-  to {
-    box-shadow:
-      0 0 0 6px rgba(255, 60, 60, 1),
-      0 0 48px 20px rgba(255, 0, 0, 0.85),
-      inset 0 0 70px 20px rgba(220, 0, 0, 0.30);
-  }
-}
-
-.danger-warning-toast {
+/* ==========================================================================
+   DISCARD CHOICE MODAL
+   ========================================================================== */
+.discard-choice-overlay {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: 108px;
-  background: linear-gradient(90deg, rgba(180,0,0,0.92) 0%, rgba(220,30,30,0.95) 50%, rgba(180,0,0,0.92) 100%);
-  color: #fff;
-  font-family: 'Segoe UI', 'Arial', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 7px 22px;
-  border-radius: 6px;
-  border: 1.5px solid rgba(255,80,80,0.7);
-  pointer-events: none;
-  z-index: 1100;
-  text-align: center;
-  white-space: nowrap;
-  box-shadow: 0 2px 12px rgba(255,0,0,0.45);
-  animation: dangerWarnPulse 0.9s ease-in-out infinite alternate;
-}
-
-@keyframes dangerWarnPulse {
-  from { opacity: 0.85; }
-  to   { opacity: 1.0;  }
-}
-
-/* ============================================================
-   STAND DECISION MODAL
-   ============================================================ */
-.stand-decision-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(5, 10, 25, 0.82);
+  top: 17.36%; left: 0; width: 100%; height: 82.64%;
+  background: rgba(6, 10, 20, 0.85);
+  backdrop-filter: blur(8px);
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 2000;
-  backdrop-filter: blur(4px);
-  animation: standOverlayIn 0.22s ease-out forwards;
+  align-items: center;
+  z-index: 2500;
+  transition: opacity 0.3s ease;
 }
 
-@keyframes standOverlayIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-.stand-decision-card {
-  background: linear-gradient(160deg, #0e1a34 0%, #121e3a 60%, #0a1226 100%);
-  border: 1.5px solid rgba(255,255,255,0.12);
-  border-radius: 16px;
-  padding: 28px 32px 24px;
-  width: 560px;
-  max-width: 90%;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.7), 0 0 40px rgba(0,100,200,0.15);
-  animation: standCardIn 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-
-@keyframes standCardIn {
-  from { transform: scale(0.88) translateY(20px); opacity: 0; }
-  to   { transform: scale(1)    translateY(0);    opacity: 1; }
-}
-
-.stand-decision-badge {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-align: center;
-  text-transform: uppercase;
-  margin-bottom: 4px;
-  opacity: 0.85;
-}
-
-.stand-decision-player {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 22px;
-  font-weight: 800;
-  text-align: center;
-  margin-bottom: 10px;
-}
-
-.stand-decision-hand-title {
-  color: rgba(180,200,230,0.65);
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 11px;
-  text-align: center;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-bottom: 4px;
-}
-
-.stand-decision-hand-str {
-  color: #e8f0ff;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 17px;
-  font-weight: 700;
-  text-align: center;
-  letter-spacing: 0.12em;
-  margin-bottom: 16px;
-}
-
-.stand-decision-divider {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
-  margin-bottom: 18px;
-}
-
-.stand-decision-options {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-}
-
-.stand-decision-option {
-  flex: 1;
-  padding: 14px 16px 12px;
-  border-radius: 10px;
+.discard-choice-card {
+  background: linear-gradient(135deg, #16233ff5 0%, #0d1527fa 100%);
+  border: 2px solid rgba(0, 229, 255, 0.4);
+  border-radius: 20px;
+  padding: 20px 24px;
+  width: 90%;
+  max-width: 520px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 14px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 40px rgba(0, 229, 255, 0.12);
 }
 
-.keep-option {
-  background: rgba(220, 40, 40, 0.10);
-  border: 1px solid rgba(220, 60, 60, 0.25);
+.discard-choice-header {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-align: center;
+  color: #00e5ff;
 }
 
-.continue-option {
-  background: rgba(0, 180, 100, 0.08);
-  border: 1px solid rgba(0, 200, 100, 0.22);
-}
-
-.stand-decision-sep {
-  padding: 0 14px;
+.discard-new-card-row {
   display: flex;
   align-items: center;
-  color: rgba(180,200,230,0.4);
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 12px;
-  font-style: italic;
-  flex-shrink: 0;
+  gap: 14px;
 }
 
-.stand-option-icon {
-  font-size: 22px;
+.discard-new-label {
+  color: #90caf9;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.discard-card-item {
+  box-sizing: border-box;
+  color: #212121;
+  background: #fff;
+  border: 2px solid #ccc;
+  border-radius: 8px;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 58px;
+  height: 82px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  position: relative;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.discard-card-item.red-suit { color: #d32f2f; }
+
+.discard-card-item.new-card {
+  border-color: #ffd700;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.discard-card-item:hover {
+  transform: translateY(-4px);
+  border-color: #00e5ff;
+  box-shadow: 0 8px 18px rgba(0, 229, 255, 0.3);
+}
+
+.discard-card-item.selected {
+  transform: translateY(-6px);
+  border-color: #00e5ff;
+  box-shadow: 0 0 16px rgba(0, 229, 255, 0.7);
+  outline: 2px solid #00e5ff;
+}
+
+.discard-card-item .preview-top {
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  display: flex;
+}
+
+.discard-card-item .preview-center {
+  font-size: 24px;
+  font-weight: 700;
+  align-self: center;
   line-height: 1;
 }
 
-.stand-option-title {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 13px;
-  font-weight: 800;
-  color: #e8f0ff;
-  letter-spacing: 0.05em;
-  text-align: center;
+.new-card-label {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  font-size: 7px;
+  font-weight: 900;
+  color: #ffd700;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 3px;
+  padding: 1px 3px;
+  letter-spacing: 0.5px;
 }
 
-.stand-option-desc {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 11.5px;
-  color: rgba(190, 210, 240, 0.7);
-  text-align: center;
-  line-height: 1.5;
+.discard-tokens-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.discard-tokens-label {
+  color: #90caf9;
+  font-size: 11px;
+}
+
+.token-dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.token-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.token-dot::before {
+  content: '◆';
+  color: rgba(255, 255, 255, 0.18);
+}
+
+.token-dot.active {
+  border-color: #00e5ff;
+  background: rgba(0, 229, 255, 0.12);
+}
+
+.token-dot.active::before {
+  color: #00e5ff;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.8);
+}
+
+.discard-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 9px;
+  width: 100%;
+}
+
+.discard-btn-add,
+.discard-btn-token,
+.discard-btn-skip,
+.discard-btn-confirm {
   flex: 1;
-}
-
-.stand-option-desc strong {
-  color: #fff;
-  font-weight: 700;
-}
-
-.stand-btn-keep, .stand-btn-continue {
-  margin-top: 8px;
-  padding: 8px 18px;
-  border-radius: 8px;
+  min-width: 110px;
+  padding: 11px 8px;
   border: none;
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
   cursor: pointer;
-  transition: transform 0.12s ease, filter 0.12s ease;
+  text-transform: uppercase;
+  transition: all 0.18s ease;
 }
 
-.stand-btn-keep {
-  background: linear-gradient(135deg, #c0392b, #e74c3c);
+.discard-btn-add {
+  background: linear-gradient(135deg, #00e676 0%, #00b0ff 100%);
+  color: #050a14;
+  box-shadow: 0 3px 12px rgba(0, 230, 118, 0.3);
+}
+.discard-btn-add:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+.discard-btn-token {
+  background: linear-gradient(135deg, #ff6f00 0%, #ff8f00 100%);
   color: #fff;
-  box-shadow: 0 3px 12px rgba(200,0,0,0.35);
+  box-shadow: 0 3px 12px rgba(255, 111, 0, 0.3);
+}
+.discard-btn-token:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+.discard-btn-skip {
+  background: rgba(50, 60, 80, 0.7);
+  color: #90caf9;
+  border: 1px solid rgba(144, 202, 249, 0.2);
+}
+.discard-btn-skip:hover { background: rgba(70, 85, 110, 0.7); }
+
+.discard-picker { width: 100%; }
+
+.discard-picker-label {
+  color: #90caf9;
+  font-size: 11px;
+  margin-bottom: 10px;
+  text-align: center;
 }
 
-.stand-btn-keep:hover {
-  filter: brightness(1.15);
-  transform: scale(1.04);
+.discard-picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.stand-btn-continue {
-  background: linear-gradient(135deg, #1a7a4a, #27ae60);
+.discard-btn-confirm {
+  background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%);
+  color: #e3f2fd;
+}
+.discard-btn-confirm:disabled {
+  background: rgba(30, 40, 60, 0.7);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+.discard-btn-confirm:not(:disabled):hover { filter: brightness(1.15); transform: translateY(-1px); }
+
+/* ==========================================================================
+   ACCEPT SHOWDOWN BUTTON (injected during lock countdown)
+   ========================================================================== */
+.accept-showdown-btn {
+  position: absolute;
+  bottom: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #b91c1c 0%, #dc2626 100%);
   color: #fff;
-  box-shadow: 0 3px 12px rgba(0,160,80,0.3);
+  border: 2px solid rgba(248, 113, 113, 0.5);
+  border-radius: 24px;
+  padding: 10px 28px;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  z-index: 2000;
+  box-shadow: 0 0 20px rgba(220, 38, 38, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: filter 0.2s ease, box-shadow 0.2s ease;
+  animation: acceptShowdownPulse 1.5s ease-in-out infinite alternate;
 }
-
-.stand-btn-continue:hover {
+.accept-showdown-btn:hover {
   filter: brightness(1.15);
-  transform: scale(1.04);
+  box-shadow: 0 0 35px rgba(220, 38, 38, 0.8), 0 4px 16px rgba(0, 0, 0, 0.5);
+  transform: translateX(-50%) scale(1.06);
+}
+@keyframes acceptShowdownPulse {
+  from { box-shadow: 0 0 15px rgba(220, 38, 38, 0.4), 0 4px 12px rgba(0, 0, 0, 0.4); }
+  to   { box-shadow: 0 0 30px rgba(220, 38, 38, 0.8), 0 4px 18px rgba(0, 0, 0, 0.5); }
 }

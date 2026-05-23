@@ -27,6 +27,7 @@ export class AimingControls {
     this.activePointerId = undefined; // Track the active pointer for multi-touch safety
     this._hasBallInHand = false;
     this.isPlacingCueBall = false;
+    this.isBreakPlacement = false; // When true, restricts BIH to kitchen (left of head string)
     this.cueBallPositionValid = true; // Tracks whether current BIH drop position is overlap-free
     this.justPlacedBall = false; // Safety flag to ignore simulated click events immediately after drop
 
@@ -70,14 +71,15 @@ export class AimingControls {
 
   showBallInHandUI() {
     this.hideBallInHandUI(); // Safeguard: remove any existing one first
-    
+
     const container = document.getElementById('game-container') || document.body;
-    
+
     const ui = document.createElement('div');
     ui.id = 'ball-in-hand-ui';
     ui.className = 'ball-in-hand-hud-overlay';
+    const btnLabel = this.isBreakPlacement ? 'CONFIRM BREAK POSITION' : 'CONFIRM POSITION';
     ui.innerHTML = `
-      <button id="confirm-placement-btn" class="hud-confirm-btn">CONFIRM POSITION</button>
+      <button id="confirm-placement-btn" class="hud-confirm-btn">${btnLabel}</button>
     `;
     container.appendChild(ui);
     
@@ -121,8 +123,12 @@ export class AimingControls {
    */
   _placeCueBallAt(x, y) {
     const cueBall = this.physics.cueBall;
-    const clampedX = Math.max(124, Math.min(900, x));
-    const clampedY = Math.max(150, Math.min(526, y));
+    const t = this.config.table;
+    const r = this.config.ball.radius;
+    const headStringX = t.xCenter - t.width / 4;
+    const maxX = this.isBreakPlacement ? headStringX : t.xCenter + t.width / 2 - r;
+    const clampedX = Math.max(t.xCenter - t.width / 2 + r, Math.min(maxX, x));
+    const clampedY = Math.max(t.yCenter - t.height / 2 + r, Math.min(t.yCenter + t.height / 2 - r, y));
 
     Matter.Body.setPosition(cueBall, { x: clampedX, y: clampedY });
     Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
@@ -149,6 +155,7 @@ export class AimingControls {
 
     this.hasBallInHand = false;
     this.isPlacingCueBall = false;
+    this.isBreakPlacement = false;
     this.cueBallPositionValid = true;
 
     // Just placed ball safety flag to prevent immediate aim-locking on pointerup simulated clicks
@@ -210,9 +217,8 @@ export class AimingControls {
     const s = this.config.slider;
     if (!s) return false;
     
-    // Left rail starts at x = 112. Anything x < 112 is in the gutter area.
-    // When aim is locked, we make the slider box extremely wide (up to x = 140)
-    // so players can easily drag the power slider without missing.
+    // When aim is locked, widen the slider hit-box considerably so players can
+    // drag power without missing the narrow track.
     const isLocked = this.isLocked;
     const horizontalBuffer = isLocked ? 80 : 30;
     // When locked, extend vertical buffer to cover the entire canvas height to avoid accidental Y-axis misses.
@@ -248,8 +254,8 @@ export class AimingControls {
 
       // Ball-in-Hand drag-to-place handler
       if (this.hasBallInHand) {
-        // Gutter/slider safety: ignore if touching near the slider (mouseX < 112)
-        if (mouseX < 112) {
+        // Gutter/slider safety: ignore if touching left of the table felt
+        if (mouseX < this.config.table.xCenter - this.config.table.width / 2) {
           return;
         }
 
@@ -272,10 +278,9 @@ export class AimingControls {
         this.activePointerId = e.pointerId; // Capture this pointer
         this.powerRatio = Math.max(0, Math.min(1, (mouseY - this.config.slider.y) / this.config.slider.height));
       } else {
-        // Gutter Safety Guard: If click/touch is in the left rail/gutter area (mouseX < 112),
-        // but somehow missed the slider (e.g. out of vertical bounds), do NOT treat it as a table interaction.
-        // This completely prevents accidental aiming resets/toggles when clicking in the left gutter.
-        if (mouseX < 112) {
+        // Gutter Safety Guard: clicks left of the table felt (slider/margin area) must not
+        // trigger aiming resets or toggles.
+        if (mouseX < this.config.table.xCenter - this.config.table.width / 2) {
           return;
         }
 
@@ -292,16 +297,17 @@ export class AimingControls {
           const dy = mouseY - cueBall.position.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist > 0.1) {
+            // Drag the cue handle → shot fires in the opposite direction
             this.strokeDir = {
-              x: dx / dist,
-              y: dy / dist
+              x: -dx / dist,
+              y: -dy / dist
             };
           }
         } else {
           // PC/Mouse device: Click on table toggles lock state
           this.isLocked = !this.isLocked;
-          
-          // If newly unlocked, snap aiming direction instantly to mouse click coordinate
+
+          // If newly unlocked, snap aiming direction instantly opposite to mouse click coordinate
           if (!this.isLocked) {
             const cueBall = this.physics.cueBall;
             const dx = mouseX - cueBall.position.x;
@@ -309,8 +315,8 @@ export class AimingControls {
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist > 0.1) {
               this.strokeDir = {
-                x: dx / dist,
-                y: dy / dist
+                x: -dx / dist,
+                y: -dy / dist
               };
             }
           }
@@ -356,16 +362,16 @@ export class AimingControls {
             // Touch device: only rotate while actively aiming (finger dragged on table)
             if (this.isAiming && dist > 0.1) {
               this.strokeDir = {
-                x: dx / dist,
-                y: dy / dist
+                x: -dx / dist,
+                y: -dy / dist
               };
             }
           } else {
             // Mouse device: only rotate if angle is UNLOCKED
             if (!this.isLocked && dist > 0.1) {
               this.strokeDir = {
-                x: dx / dist,
-                y: dy / dist
+                x: -dx / dist,
+                y: -dy / dist
               };
             }
           }
@@ -413,10 +419,11 @@ export class AimingControls {
 
       // Release triggers shot if power ratio is greater than minPower
       if (currentPower >= this.config.cue.minPower) {
-        // Calibrate max speed: normal shot max is 10.0, break shot max is 20.0 (exactly 2x normal max)
-        const maxNormalSpeed = this.config.ball.maxSpeed / 2;
-        const maxShotSpeed = this.physics.isBreakShot ? this.config.ball.maxSpeed : maxNormalSpeed;
-        const minShotSpeed = 0.8; // Calibrated very gentle soft shot speed threshold
+        // Break shots get 2x speed cap for a satisfying rack scatter.
+        const maxShotSpeed = this.physics.isBreakShot
+          ? this.config.ball.maxSpeed
+          : this.config.ball.maxSpeed / 2;
+        const minShotSpeed = 0.8;
         
         // Linearly interpolate cue ball velocity magnitude
         const velocityMagnitude = minShotSpeed + currentPower * (maxShotSpeed - minShotSpeed);
@@ -459,7 +466,9 @@ export class AimingControls {
     const cueBall = this.physics.cueBall;
     const startX = cueBall.position.x;
     const startY = cueBall.position.y;
-    const R = this.config.ball.radius;
+    // Add stroke half-width (0.75px = half of 1.5px ball outline) so the ghost ball
+    // visually appears to just touch the object ball rather than overlap it.
+    const R = this.config.ball.radius + 0.75;
 
     let hasHit = false;
     let closestTarget = null;

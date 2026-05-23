@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const M = require\\('./node_modules/matter-js/build/matter.js'\\); const b = M.Bodies.circle\\(0,0,10,{}\\); console.log\\('circleRadius:', b.circleRadius, 'vertices count:', b.vertices.length, 'bounds:', JSON.stringify\\(b.bounds\\)\\)\")",
+      "Bash(npx vite *)"
+    ]
+  }
+}

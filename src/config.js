@@ -21,15 +21,15 @@ export const CONFIG = {
   
   table: {
     /** @type {number} Width of the play area inside the cushions (2:1 ratio) */
-    width: 800,
+    width: 600,
     /** @type {number} Height of the play area inside the cushions (2:1 ratio) */
-    height: 400,
+    height: 300,
     /** @type {number} Center coordinate along X-axis */
     xCenter: 512,
     /** @type {number} Center coordinate along Y-axis (offset down to leave room for HUD) */
     yCenter: 338,
     /** @type {number} Thickness of the rails in pixels */
-    railWidth: 30,
+    railWidth: 22,
     /** @type {number} Coefficient of restitution for rails (bounce bounciness, 0 to 1) */
     railRestitution: 0.8,
     /** @type {number} Alias for railRestitution to satisfy TDD test specifications */
@@ -42,9 +42,9 @@ export const CONFIG = {
   
   pocket: {
     /** @type {number} Radius of the pocket sensors in pixels */
-    radius: 28,
+    radius: 22,
     /** @type {number} Collision buffer/offset to place side pockets slightly outward */
-    sideOffset: 19
+    sideOffset: 14
   },
 
   // ==========================================
@@ -101,11 +101,11 @@ export const CONFIG = {
     /** @type {number} X position on canvas (left edge layout space) */
     x: 22,
     /** @type {number} Y starting position on canvas (aligned with active felt Y) */
-    y: 138,
+    y: 188,
     /** @type {number} Width of the slider background panel */
     width: 38,
     /** @type {number} Height of the slider background panel */
-    height: 400,
+    height: 300,
     /** @type {number} Pointer interaction touch padding buffer */
     touchBuffer: 20
   },
@@ -182,25 +182,25 @@ export const CONFIG = {
     player1Name: 'Alice',
     /** @type {string} Name of Player 2 */
     player2Name: 'Bob',
-    /** @type {number} Maximum number of cards in hand (Milestone 4/5 cap) */
+    /** @type {number} Maximum number of cards in hand */
     handLimit: 5,
-    /** @type {number} Maximum consecutive misses allowed before DQ (Milestone 4 DQ) */
-    maxConsecutiveMisses: 3,
-    /** @type {number} Turns/shots allowed to opponent after a player voluntary stands */
-    standCountdownTurns: 2,
+    /** @type {number} Discard tokens each player starts with (spend to discard a card after pocketing) */
+    discardTokens: 3,
+    /** @type {number} Turns the opponent gets after a player becomes locked (5 cards + 0 tokens) */
+    lockCountdownTurns: 3,
     /** @type {number} Minimum cushion contacts required for a legal break if no ball is pocketed */
     minBreakCushionContacts: 4,
     /** @type {Array<{x: number, y: number}>} 9-point respawn matrix coordinates */
     respawnMatrix: [
-      { x: 312, y: 238 },
-      { x: 312, y: 338 },
-      { x: 312, y: 438 },
-      { x: 512, y: 270 },
+      { x: 362, y: 263 },
+      { x: 362, y: 338 },
+      { x: 362, y: 413 },
+      { x: 512, y: 287 },
       { x: 512, y: 338 },
-      { x: 512, y: 406 },
-      { x: 712, y: 238 },
-      { x: 712, y: 338 },
-      { x: 712, y: 438 }
+      { x: 512, y: 389 },
+      { x: 662, y: 263 },
+      { x: 662, y: 338 },
+      { x: 662, y: 413 }
     ]
   }
 };

@@ -48,6 +48,10 @@ async function initSandbox() {
   // Start the match by triggering the virtual coin toss
   await game.startMatch(controls, renderer);
 
+  // After coin toss: breaking player places cue ball anywhere in the kitchen
+  controls.isBreakPlacement = true;
+  controls.hasBallInHand = true;
+
   let isShotActive = false;
 
   // 5. Core Game Loop running inside Pixi ticker (synced to display refresh rate)
