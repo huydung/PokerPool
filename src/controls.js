@@ -311,6 +311,16 @@ export class AimingControls {
       if (!allStopped) return;
       if (y < 100) return; // ignore HUD strip
 
+      // ── Right panel area — let Pixi handle its own interactive buttons ──────
+      // Any click at x ≥ canvas.width-56 belongs to the right panel (?, i, CHEAT).
+      // Returning here prevents the DOM pointerdown from starting an aim drag that
+      // would fight with Pixi's own button pointerdown event on the same canvas.
+      const rightPanelLeft = this.config.canvas.width - 56;
+      if (x >= rightPanelLeft) {
+        console.log(`[CONTROLS] Click in right panel area (x=${x.toFixed(0)}) — deferring to Pixi`);
+        return;
+      }
+
       // ── Cheat mode: ball / pocket click selection ──────────────────────────
       if (this.cheatEnabled) {
         this._handleCheatClick(x, y);

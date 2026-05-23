@@ -27,6 +27,10 @@ export class PhysicsEngine {
     this.cueBall = null;
     this.isBreakShot = true;
     this.cushionContactSet = new Set(); // Track which target balls contact cushions during a shot
+    /** True once the cue ball has contacted any object ball this shot */
+    this.firstBallContactMade = false;
+    /** True once any ball (cue or object) contacts a cushion AFTER first ball-ball contact */
+    this.cushionContactAfterBallHit = false;
     /** @type {AimingControls|null} Reference to the controls instance for BIH state checks */
     this.controls = null;
 
@@ -212,14 +216,33 @@ export class PhysicsEngine {
       event.pairs.forEach((collisionPair) => {
         const { bodyA, bodyB } = collisionPair;
 
-        // Track cushion contacts during a shot
-        if (bodyA.label === 'cushion' && bodyB.label === 'ball') {
-          this.cushionContactSet.add(bodyB.plugin.ballId);
-        } else if (bodyB.label === 'cushion' && bodyA.label === 'ball') {
-          this.cushionContactSet.add(bodyA.plugin.ballId);
+        // ── Cue ball → object ball first contact ─────────────────────────────
+        const isCueA = bodyA.label === 'cue_ball';
+        const isCueB = bodyB.label === 'cue_ball';
+        const isBallA = bodyA.label === 'ball';
+        const isBallB = bodyB.label === 'ball';
+        if ((isCueA && isBallB) || (isCueB && isBallA)) {
+          if (!this.firstBallContactMade) {
+            this.firstBallContactMade = true;
+            console.log('[PHYSICS] First cue-to-ball contact registered');
+          }
         }
 
-        // Check for Ball overlapping Pockets
+        // ── Cushion contacts ──────────────────────────────────────────────────
+        const isCushionA = bodyA.label === 'cushion';
+        const isCushionB = bodyB.label === 'cushion';
+        if (isCushionA && isBallB) {
+          this.cushionContactSet.add(bodyB.plugin.ballId);
+          if (this.firstBallContactMade) this.cushionContactAfterBallHit = true;
+        } else if (isCushionB && isBallA) {
+          this.cushionContactSet.add(bodyA.plugin.ballId);
+          if (this.firstBallContactMade) this.cushionContactAfterBallHit = true;
+        } else if ((isCushionA && isCueB) || (isCushionB && isCueA)) {
+          // Cue ball hitting cushion also counts after first ball contact
+          if (this.firstBallContactMade) this.cushionContactAfterBallHit = true;
+        }
+
+        // ── Pocket overlaps ───────────────────────────────────────────────────
         if (bodyA.label === 'pocket' && (bodyB.label === 'ball' || bodyB.label === 'cue_ball')) {
           if (this.onPocketOverlap) this.onPocketOverlap(bodyB, bodyA);
         } else if (bodyB.label === 'pocket' && (bodyA.label === 'ball' || bodyA.label === 'cue_ball')) {
@@ -342,7 +365,10 @@ export class PhysicsEngine {
    */
   applyCueStroke(velocity) {
     if (!this.cueBall) return;
-    this.cushionContactSet.clear(); // Reset cushion touches when a new shot starts
+    // Reset all per-shot tracking when a new shot fires
+    this.cushionContactSet.clear();
+    this.firstBallContactMade = false;
+    this.cushionContactAfterBallHit = false;
     const speed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2);
     console.log(`[PHYSICS] Cue stroke applied: vx=${velocity.x.toFixed(2)} vy=${velocity.y.toFixed(2)} speed=${speed.toFixed(2)}`);
     // Overrides any residual velocities and guarantees 100% directional accuracy

@@ -109,6 +109,17 @@ export class GameEngine {
     this.pocketSuits = new Array(6).fill(null);
     this.phase = 1;
 
+    // ── End-game state ────────────────────────────────────────────────────────
+    /** True once both players hold 5-card hands — triggers end-game dialog each turn */
+    this._endgameEligible = false;
+    /** Name of the player who first requested end game, or null */
+    this._endGameFirstRequester = null;
+    /** True when the opponent is taking their single final turn after a Request End Game */
+    this._opponentFinalTurn = false;
+
+    // ── Shot validity bypass flag (cheat shots skip the validity check) ───────
+    this._skipShotValidityCheck = false;
+
     // ── Cheat mode ────────────────────────────────────────────────────────────
     this.cheatEnabled = false;
     /** Ordered list of physics bodies selected for cheat pocket simulation */
@@ -239,7 +250,10 @@ export class GameEngine {
     if (this.gameEnded) return;
     this._shotInProgress = false; // Close the shot window immediately
 
-    console.log(`[SHOT_END] player=${this.activePlayer} break=${this.isBreakShot} scratch=${this.cueBallScratchThisShot} pocketed=[${this.pocketedBallsThisShot.join(',')}]`);
+    // Capture before processing — opponent may take their final turn this shot
+    const wasOpponentFinalTurn = this._opponentFinalTurn;
+
+    console.log(`[SHOT_END] player=${this.activePlayer} break=${this.isBreakShot} scratch=${this.cueBallScratchThisShot} pocketed=[${this.pocketedBallsThisShot.join(',')}] firstContact=${physics.firstBallContactMade} cushionAfter=${physics.cushionContactAfterBallHit}`);
 
     const opponent = this.opponent;
 
@@ -274,6 +288,65 @@ export class GameEngine {
 
     // After each shot, refresh Finish Shot button visibility for cheat mode
     this._updateCheatFinishButton(physics);
+
+    if (this.gameEnded) return;
+
+    // ── Opponent final-turn check ─────────────────────────────────────────────
+    // If this shot was the opponent's single allowed turn after a Request End Game,
+    // trigger showdown immediately — no further dialog.
+    if (wasOpponentFinalTurn) {
+      console.log('[ENDGAME] Opponent final turn complete → triggering showdown');
+      this.triggerShowdown();
+      return;
+    }
+
+    // ── Endgame eligibility ───────────────────────────────────────────────────
+    if (!this._endgameEligible) {
+      const h1 = (this.hands[this.player1Name] || []).length;
+      const h2 = (this.hands[this.player2Name] || []).length;
+      if (h1 >= 5 && h2 >= 5) {
+        this._endgameEligible = true;
+        console.log('[ENDGAME] Both players now hold 5-card hands — end game dialog active');
+        this.showShotToast('🎯 Both hands complete! End Game available each turn.', 'score', 4000);
+      }
+    }
+
+    // ── End-game dialog ───────────────────────────────────────────────────────
+    if (this._endgameEligible) {
+      if (this.controls) this.controls.enabled = false;
+      const decision = await this._showEndGameDialog();
+      if (this.controls) this.controls.enabled = true;
+
+      if (decision === 'end') {
+        const requester = this.activePlayer;
+        const opp = requester === this.player1Name ? this.player2Name : this.player1Name;
+
+        if (this._endGameFirstRequester !== null) {
+          // Both players want to end → showdown now
+          console.log(`[ENDGAME] ${requester} also requests end game → showdown`);
+          this.triggerShowdown();
+          return;
+        }
+
+        // First request: give opponent one final turn
+        this._endGameFirstRequester = requester;
+        this._opponentFinalTurn = true;
+        this.activePlayer = opp;
+        console.log(`[ENDGAME] ${requester} requested end game — ${opp} gets ONE final turn`);
+        this.showShotToast(`⏰ ${requester} called End Game — ${opp} gets one last shot!`, 'mixed', 4000);
+        if (this.renderer) {
+          this.renderer.setActivePlayer(this.activePlayer);
+          this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
+        }
+      } else {
+        // "Continue Shooting" — cancel any outstanding first-request (both chose to continue)
+        if (this._endGameFirstRequester !== null) {
+          console.log(`[ENDGAME] ${this.activePlayer} chose to continue — end game request by ${this._endGameFirstRequester} cancelled`);
+          this._endGameFirstRequester = null;
+          this._opponentFinalTurn = false;
+        }
+      }
+    }
   }
 
   async _handleBreakShot(physics, opponent) {
@@ -328,6 +401,34 @@ export class GameEngine {
       this.showShotToast(`🔒 ${opponent === this.player1Name ? this.player2Name : this.player1Name} is locked — interference shot`, 'miss');
       if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
       return;
+    }
+
+    // ── VALID SHOT CHECK ─────────────────────────────────────────────────────
+    // Rule: cue ball MUST contact at least one object ball, AND after that
+    // first contact either any ball touches a cushion OR any ball is pocketed.
+    // Scratch counts as "ball pocketed" for this rule (handled separately below).
+    // Cheat shots bypass this check via _skipShotValidityCheck flag.
+    if (!this._skipShotValidityCheck) {
+      const anyPocketed = this.pocketedBallsThisShot.length > 0 || this.cueBallScratchThisShot;
+      const validShot = physics.firstBallContactMade &&
+                        (physics.cushionContactAfterBallHit || anyPocketed);
+
+      if (!validShot) {
+        const reason = !physics.firstBallContactMade
+          ? 'Cue ball must contact an object ball'
+          : 'After contact, a ball must reach a cushion or be pocketed';
+        console.log(`[VALID_SHOT] INVALID — ${reason}. firstContact=${physics.firstBallContactMade} cushionAfter=${physics.cushionContactAfterBallHit} anyPocketed=${anyPocketed}`);
+        // Respawn any balls that happened to trickle into pockets during the invalid shot
+        this.pocketedBallsDetails.forEach(({ ballId }) => {
+          const ball = (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId);
+          if (ball) { physics.respawnBall(ball); this.renderer?.setBallVisibility(ball.id, true); }
+        });
+        this.activePlayer = opponent;
+        if (this.controls) this.controls.hasBallInHand = true;
+        this.showShotToast(`🚫 Invalid shot — ${reason}. Ball-in-Hand for ${this.activePlayer}!`, 'scratch', 4000);
+        if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
+        return;
+      }
     }
 
     // ── SCRATCH ──────────────────────────────────────────────────────────────
@@ -626,18 +727,23 @@ export class GameEngine {
           });
         }
 
-        // Discard — remove selected card, deduct token if not a free overflow discard
+        // Discard — remove selected card, deduct token unless this is a FREE discard.
+        // A discard is free ONLY when: hand still exceeds 5 cards AND multiple balls
+        // were pocketed this shot. A single-ball pocket overflow always costs a token.
         const discardBtn = overlay.querySelector('#dc-discard');
         if (discardBtn) {
           discardBtn.addEventListener('click', () => {
             if (!selectedUid) return;
             const beforeSize = workingHand.length;
             workingHand = workingHand.filter(c => c.uid !== selectedUid);
-            // Token cost only when the discard does NOT reduce an overflow (i.e. beforeSize ≤ 5)
-            const wasOverflow = beforeSize > 5;
-            if (!wasOverflow && availableTokens > 0) {
+            // Free only when reducing from genuine multi-ball overflow (beforeSize > 5 AND multi-ball shot)
+            const isFreeDiscard = beforeSize > 5 && newCards.length > 1;
+            if (!isFreeDiscard && availableTokens > 0) {
               availableTokens--;
               tokensSpent++;
+              console.log(`[DIALOG] Token spent on discard — ${availableTokens} remaining`);
+            } else if (isFreeDiscard) {
+              console.log(`[DIALOG] Free discard (multi-ball overflow, beforeSize=${beforeSize})`);
             }
             selectedUid = null;
             renderContent();
@@ -1214,6 +1320,8 @@ export class GameEngine {
 
     // Clear registers before simulating pocket events
     this.handleShotStart();
+    // Cheat shots bypass the valid-shot rule (no real cue stroke happens)
+    this._skipShotValidityCheck = true;
 
     // Simulate each ball being pocketed
     const pocketCount = this._cheatPocketSelections.length;
@@ -1230,11 +1338,67 @@ export class GameEngine {
     // Run the full normal shot-end processing
     await this.handleShotEnd(physics);
 
+    // Restore validity check after cheat shot processing completes
+    this._skipShotValidityCheck = false;
+
     // After processing, show Finish Shot button again for next shot
     this._updateCheatFinishButton(physics);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Shows the "Request End Game / Continue Shooting" dialog that appears at the
+   * start of each player's turn when both hands are complete (5 cards each).
+   *
+   * @returns {Promise<'end'|'continue'>}
+   */
+  _showEndGameDialog() {
+    return new Promise((resolve) => {
+      const player = this.activePlayer;
+      const isFinal = this._opponentFinalTurn;         // This is the opponent's final allowed turn
+      const firstReq = this._endGameFirstRequester;     // Who first requested (if anyone)
+      const isP1 = player === this.player1Name;
+      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
+
+      const headerText = isFinal
+        ? `⏰ FINAL TURN — ${player.toUpperCase()}`
+        : `🏁 BOTH HANDS FULL`;
+
+      const bodyText = isFinal
+        ? `${firstReq} called End Game. This is your last chance to shoot — or end it now.`
+        : `Both players have 5-card hands. Call the showdown or keep shooting?`;
+
+      const container = document.getElementById('game-container') || document.body;
+      const overlay = document.createElement('div');
+      overlay.className = 'endgame-dialog-overlay';
+      overlay.innerHTML = `
+        <div class="endgame-dialog-card" style="border-color:${accentColor}60">
+          <div class="endgame-dialog-title" style="color:${accentColor}">${headerText}</div>
+          <div class="endgame-dialog-player">${player.toUpperCase()}</div>
+          <div class="endgame-dialog-body">${bodyText}</div>
+          <div class="endgame-dialog-actions">
+            <button class="endgame-btn-end" id="eg-end">⚔ Request End Game</button>
+            <button class="endgame-btn-continue" id="eg-continue">🎱 Continue Shooting</button>
+          </div>
+        </div>
+      `;
+      container.appendChild(overlay);
+
+      console.log(`[ENDGAME] Dialog shown for ${player} (isFinal=${isFinal} firstRequester=${firstReq})`);
+
+      document.getElementById('eg-end').addEventListener('click', () => {
+        overlay.remove();
+        console.log(`[ENDGAME] ${player} chose → Request End Game`);
+        resolve('end');
+      });
+      document.getElementById('eg-continue').addEventListener('click', () => {
+        overlay.remove();
+        console.log(`[ENDGAME] ${player} chose → Continue Shooting`);
+        resolve('continue');
+      });
+    });
+  }
 
   /** @deprecated HTML button — now replaced by Pixi right panel */
   _injectRulesButton(container) {

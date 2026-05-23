@@ -1179,3 +1179,112 @@ canvas {
   from { box-shadow: 0 0 15px rgba(220, 38, 38, 0.4), 0 4px 12px rgba(0, 0, 0, 0.4); }
   to   { box-shadow: 0 0 30px rgba(220, 38, 38, 0.8), 0 4px 18px rgba(0, 0, 0, 0.5); }
 }
+
+/* ==========================================================================
+   END-GAME DIALOG — shown at turn start when both hands are complete (5 cards)
+   ========================================================================== */
+
+.endgame-dialog-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(4, 6, 14, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2500;
+  pointer-events: auto;
+  animation: endgameFadeIn 0.3s ease forwards;
+}
+
+@keyframes endgameFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.endgame-dialog-card {
+  background: linear-gradient(135deg, #141e36 0%, #0c1224 100%);
+  border: 2px solid rgba(0, 229, 255, 0.35);
+  border-radius: 20px;
+  padding: 28px 32px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(0, 229, 255, 0.12);
+  max-width: 380px;
+  width: 80%;
+  animation: endgameCardIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes endgameCardIn {
+  from { transform: scale(0.88); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.endgame-dialog-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.endgame-dialog-player {
+  font-size: 22px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 3px;
+  margin-bottom: 12px;
+  text-shadow: 0 0 20px rgba(255,255,255,0.3);
+}
+
+.endgame-dialog-body {
+  color: #90a4ae;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 22px;
+}
+
+.endgame-dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.endgame-btn-end {
+  background: linear-gradient(135deg, #b71c1c 0%, #7f0000 100%);
+  color: #ffcdd2;
+  border: 1.5px solid rgba(229, 57, 53, 0.6);
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 4px 16px rgba(183, 28, 28, 0.4);
+}
+.endgame-btn-end:hover {
+  background: linear-gradient(135deg, #d32f2f 0%, #9a0000 100%);
+  box-shadow: 0 6px 24px rgba(211, 47, 47, 0.6);
+  transform: translateY(-1px);
+}
+
+.endgame-btn-continue {
+  background: linear-gradient(135deg, #0d2e4a 0%, #07192a 100%);
+  color: #64b5f6;
+  border: 1.5px solid rgba(100, 181, 246, 0.3);
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.endgame-btn-continue:hover {
+  background: linear-gradient(135deg, #153d60 0%, #0d2540 100%);
+  border-color: rgba(100, 181, 246, 0.6);
+  transform: translateY(-1px);
+}
