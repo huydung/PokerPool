@@ -312,11 +312,14 @@ export class PhysicsEngine {
       // Park the cue ball well off-canvas so it stays invisible while target balls
       // continue rolling.  areAllBallsStopped() still works correctly because the
       // body still exists in the world with velocity = 0.
+      console.log(`[PHYSICS] Cue ball scratched — parked off-canvas at (-500,-500)`);
       Matter.Body.setPosition(ball, { x: -500, y: -500 });
       Matter.Body.setVelocity(ball, { x: 0, y: 0 });
       Matter.Body.setAngularVelocity(ball, 0);
     } else {
       // Target ball pocketed: remove from physical world and active array
+      const ballId = ball.plugin?.ballId ?? '?';
+      console.log(`[PHYSICS] Ball ${ballId} (id=${ball.id}) pocketed — removed from world. Active balls remaining: ${this.targetBalls.length - 1}`);
       Matter.Composite.remove(this.world, ball);
       this.targetBalls = this.targetBalls.filter(b => b.id !== ball.id);
     }
@@ -329,6 +332,8 @@ export class PhysicsEngine {
   applyCueStroke(velocity) {
     if (!this.cueBall) return;
     this.cushionContactSet.clear(); // Reset cushion touches when a new shot starts
+    const speed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2);
+    console.log(`[PHYSICS] Cue stroke applied: vx=${velocity.x.toFixed(2)} vy=${velocity.y.toFixed(2)} speed=${speed.toFixed(2)}`);
     // Overrides any residual velocities and guarantees 100% directional accuracy
     Matter.Body.setVelocity(this.cueBall, velocity);
   }
@@ -384,6 +389,8 @@ export class PhysicsEngine {
     }
 
     // Teleport the ball to the spot, set velocity to zero
+    const ballId = ball.plugin?.ballId ?? '?';
+    console.log(`[PHYSICS] Ball ${ballId} respawned at (${freeSpot.x}, ${freeSpot.y})${freeSpot === matrix[0] && !matrix.find(s => s !== freeSpot) ? ' [FALLBACK - all spots blocked]' : ''}`);
     Matter.Body.setPosition(ball, { x: freeSpot.x, y: freeSpot.y });
     Matter.Body.setVelocity(ball, { x: 0, y: 0 });
     Matter.Body.setAngularVelocity(ball, 0);

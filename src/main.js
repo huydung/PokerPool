@@ -46,6 +46,10 @@ async function initSandbox() {
   // Wire controls back into physics so physics.update() can check BIH state
   physics.controls = controls;
 
+  // Wire shot-fired callback: handleShotStart clears per-shot registers BEFORE
+  // applyCueStroke so no pocket event from the first physics frame is lost.
+  controls.onShotFired = () => game.handleShotStart();
+
   // Start the match by triggering the virtual coin toss
   await game.startMatch(controls, renderer);
 
@@ -77,8 +81,10 @@ async function initSandbox() {
     // Step E: Manage shot lifecycle turn-transitions and break evaluations
     const allStopped = physics.areAllBallsStopped();
     if (!isShotActive && !allStopped) {
+      // Shot is now in flight — handleShotStart() was already called at fire-time
+      // via controls.onShotFired to avoid the timing race where a fast pocket in
+      // this first physics frame would be recorded and then immediately erased.
       isShotActive = true;
-      game.handleShotStart();
     } else if (isShotActive && allStopped) {
       isShotActive = false;
       // Auto-aim toward the ball with the clearest path to a pocket after every shot

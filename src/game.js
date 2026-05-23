@@ -180,11 +180,16 @@ export class GameEngine {
   handlePocketOverlap(ball, pocketId = -1) {
     if (ball.label === 'cue_ball') {
       this.cueBallScratchThisShot = true;
+      console.log(`[POCKET] Cue ball scratched → pocket ${pocketId}`);
     } else {
       const ballId = ball.plugin.ballId;
       if (!this.pocketedBallsThisShot.includes(ballId)) {
         this.pocketedBallsThisShot.push(ballId);
         this.pocketedBallsDetails.push({ ballId, ball, pocketId });
+        const suitLabel = this.pocketSuits[pocketId] ?? 'unset';
+        console.log(`[POCKET] Ball ${ballId} → pocket ${pocketId} (suit=${suitLabel}), shot tally: [${this.pocketedBallsThisShot.join(',')}]`);
+      } else {
+        console.log(`[POCKET] Ball ${ballId} pocket event de-duped (already recorded this shot)`);
       }
     }
   }
@@ -193,12 +198,13 @@ export class GameEngine {
     this.pocketedBallsThisShot = [];
     this.pocketedBallsDetails = [];
     this.cueBallScratchThisShot = false;
+    console.log(`[SHOT_START] Registers cleared — ${this.activePlayer}'s shot`);
   }
 
   async handleShotEnd(physics) {
     if (this.gameEnded) return;
 
-    console.log(`Shot end. Break:${this.isBreakShot}, Pocketed:[${this.pocketedBallsThisShot.join(',')}], Scratch:${this.cueBallScratchThisShot}`);
+    console.log(`[SHOT_END] player=${this.activePlayer} break=${this.isBreakShot} scratch=${this.cueBallScratchThisShot} pocketed=[${this.pocketedBallsThisShot.join(',')}]`);
 
     const opponent = this.opponent;
 
@@ -309,11 +315,13 @@ export class GameEngine {
 
     // Phase 2: Show ONE unified hand dialog for all new cards at once
     if (cardsToAdd.length > 0) {
+      console.log(`[DIALOG] Showing hand dialog for ${this.activePlayer}: newCards=[${cardsToAdd.map(c=>`${c.rank}${c.suit}`).join(',')}]`);
       const { tokensSpent } = await this._showUnifiedHandDialog(this.activePlayer, cardsToAdd);
       this.discardTokens[this.activePlayer] = Math.max(
         0,
         (this.discardTokens[this.activePlayer] ?? 0) - tokensSpent
       );
+      console.log(`[DIALOG] Done — tokensSpent=${tokensSpent}, tokens remaining=${this.discardTokens[this.activePlayer]}, hand=[${(this.hands[this.activePlayer]||[]).map(c=>`${c.rank}${c.suit}`).join(',')}]`);
 
       // Track who first completed a full 5-card hand
       if (this.hands[this.activePlayer].length === 5 && !this.firstToCompleteHand) {
@@ -321,13 +329,18 @@ export class GameEngine {
       }
     }
 
-    // Phase 3: Apply physics actions (respawn or permanently remove wildcard balls)
+    // Phase 3: Apply physics actions (respawn or permanently remove balls)
+    console.log(`[ACTIONS] Applying ${ballActions.length} ball action(s): ${ballActions.map(a=>`ball${a.ball?.plugin?.ballId}→${a.action}`).join(', ')}`);
     for (const { ball, action } of ballActions) {
       if (action === 'remove') {
+        console.log(`[ACTIONS] Permanently removing ball ${ball?.plugin?.ballId} (id=${ball?.id})`);
         if (this.renderer) this.renderer.setBallVisibility(ball.id, false);
         Matter.Composite.remove(physics.world, ball);
         physics.targetBalls = physics.targetBalls.filter(b => b.id !== ball.id);
+        // Also remove from allTargetBalls so future lookups don't resurrect it
+        physics.allTargetBalls = physics.allTargetBalls.filter(b => b.id !== ball.id);
       } else {
+        console.log(`[ACTIONS] Respawning ball ${ball?.plugin?.ballId} (id=${ball?.id})`);
         physics.respawnBall(ball);
         if (this.renderer) this.renderer.setBallVisibility(ball.id, true);
       }
@@ -360,12 +373,17 @@ export class GameEngine {
     const invalidReasons = [];
     let anyValid = false;
 
+    console.log(`[RESOLVE] Processing ${this.pocketedBallsDetails.length} pocketed ball(s) for ${this.activePlayer}`);
+
     for (const detail of this.pocketedBallsDetails) {
       const { ballId, pocketId } = detail;
       const originalBall =
         (physics.allTargetBalls || physics.targetBalls).find(b => b.plugin.ballId === ballId)
         || detail.ball;
-      if (!originalBall) continue;
+      if (!originalBall) {
+        console.warn(`[RESOLVE] Ball ${ballId} body not found — skipping (will stay removed!)`);
+        continue;
+      }
 
       const isWildcard = ballId > 13; // balls 14–15 are wildcards
 
@@ -385,6 +403,9 @@ export class GameEngine {
           oppHand.some(c => c.rank === ballId && c.suit === s)
         );
         const rankAction = rankExhausted ? 'remove' : 'respawn';
+        if (rankExhausted) {
+          console.log(`[RESOLVE] Ball ${ballId} RANK EXHAUSTED — all 4 suits held. Permanently removing.`);
+        }
 
         if (suit === null) {
           if (this.phase === 1) {
@@ -400,6 +421,7 @@ export class GameEngine {
 
             // Brief notification so players know which suit was assigned
             const suitNames = { S: 'Spades', H: 'Hearts', D: 'Diamonds', C: 'Clubs' };
+            console.log(`[RESOLVE] Ball ${ballId}: pocket ${pocketId} auto-assigned suit ${autoSuit}`);
             this.showShotToast(`🎲 New pocket → ${suitNames[autoSuit]}!`, 'score', 2000);
 
             // Auto-promote remaining unmapped pockets to Wild when 4 suits are set
@@ -430,8 +452,10 @@ export class GameEngine {
         if (!alreadyHeld) {
           cardsToAdd.push({ rank: ballId, suit });
           anyValid = true;
+          console.log(`[RESOLVE] Ball ${ballId}: card ${ballId}${suit} → queued for hand, action=${rankAction}`);
         } else {
           invalidReasons.push('duplicate');
+          console.log(`[RESOLVE] Ball ${ballId}: ${ballId}${suit} already held (duplicate), action=${rankAction}`);
         }
         ballActions.push({ ball: originalBall, action: rankAction });
 
@@ -506,7 +530,10 @@ export class GameEngine {
       const renderContent = () => {
         const isOverflow = workingHand.length > 5;
         const canKeep = !isOverflow;
-        const freeDiscard = isOverflow; // overflow discard costs nothing
+        // Free overflow-discard only when the player pocketed MULTIPLE balls this shot.
+        // If they already had ≥5 from a prior turn and pocket just one new ball, they must
+        // spend a token to discard — the free pass only covers multi-ball-same-shot overflow.
+        const freeDiscard = isOverflow && newCards.length > 1;
         const canDiscard = freeDiscard || availableTokens > 0;
 
         const cardsHtml = workingHand.map(c => {
@@ -523,7 +550,7 @@ export class GameEngine {
         }).join('');
 
         const discardLabel = freeDiscard
-          ? 'Discard (Free)'
+          ? 'Discard (Free — multi-ball shot)'
           : `Discard (${availableTokens} chance${availableTokens !== 1 ? 's' : ''} left)`;
 
         overlay.innerHTML = `
@@ -878,20 +905,26 @@ export class GameEngine {
     const anyInvalidDrop = invalidReasons.length > 0;
     const primaryReason = invalidReasons[0] || null;
 
+    console.log(`[TURN] anyValid=${anyValidScore} invalidReasons=[${invalidReasons.join(',')}] activePlayer=${this.activePlayer}`);
+
     if (anyValidScore && !anyInvalidDrop) {
       const handSize = (this.hands[this.activePlayer] || []).length;
       const tok = this.discardTokens[this.activePlayer] ?? 0;
+      console.log(`[TURN] Clean score → ${this.activePlayer} keeps turn. hand=${handSize}/5 tokens=${tok}`);
       this.showShotToast(`✅ Scored! ${this.activePlayer}: ${handSize}/5 cards, ${tok} token${tok !== 1 ? 's' : ''} left — bonus turn`, 'score');
 
     } else if (anyValidScore && anyInvalidDrop) {
+      console.log(`[TURN] Mixed → turn passes to ${opponent}`);
       this.activePlayer = opponent;
       this.showShotToast(`⚠️ Mixed shot — card scored but also: ${this._invalidReasonText(primaryReason)}`, 'mixed');
 
     } else if (anyInvalidDrop) {
+      console.log(`[TURN] Invalid (${primaryReason}) → turn passes to ${opponent}`);
       this.activePlayer = opponent;
       this.showShotToast(`🚫 ${this._invalidReasonText(primaryReason)}`, 'invalid');
 
     } else {
+      console.log(`[TURN] Miss → turn passes to ${opponent}`);
       this.activePlayer = opponent;
       this.showShotToast(`💨 Miss — Turn → ${opponent}`, 'miss');
     }

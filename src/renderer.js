@@ -686,21 +686,30 @@ export class CanvasRenderer {
     btn.x = this.config.canvas.width / 2;
     btn.y = 78; // centre of the 62–85 band ≈ 73.5, shifted down ~5px per UX feedback
 
-    // Draws button in valid (green) or invalid (red) state
+    // Draws button in valid (green) or invalid (red) state and enables/disables interaction
+    let _isValid = true;
     const drawState = (valid) => {
+      _isValid = valid;
       bg.clear();
       const w = 230, h = 20;
       bg.roundRect(-w / 2, -h / 2, w, h, h / 2);
       bg.fill({ color: valid ? 0x00c853 : 0x880000, alpha: valid ? 0.95 : 0.85 });
       bg.stroke({ color: valid ? 0x00e676 : 0xff5252, width: 1.5, alpha: 0.9 });
-      text.text = valid ? label : '⚠ OVERLAPPING BALL';
+      text.text = valid ? label : '⚠ OVERLAPPING — DRAG CUE BALL';
       text.style.fill = valid ? 0x001a00 : 0xffcccc;
-      btn.cursor = valid ? 'pointer' : 'default';
+      btn.cursor = valid ? 'pointer' : 'not-allowed';
+      btn.alpha = valid ? 1.0 : 0.75;
     };
     drawState(true);
     btn._drawState = drawState;
 
-    btn.on('pointerdown', (e) => { e.stopPropagation(); onConfirm(); });
+    // Guard: only fire onConfirm when the position is actually valid.
+    // _isValid is kept in sync by drawState, which is called from updateBallInHandButton
+    // on every pointer-move, so it reflects the true current overlap state.
+    btn.on('pointerdown', (e) => {
+      e.stopPropagation();
+      if (_isValid) onConfirm();
+    });
 
     this._bihConfirmButton = btn;
     this.uiContainer.addChild(btn);

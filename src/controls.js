@@ -38,6 +38,16 @@ export class AimingControls {
     // Active status
     this.enabled = true;
 
+    /**
+     * Optional callback invoked immediately before a cue stroke is applied.
+     * Wire this to game.handleShotStart() so shot-tracking is cleared at the
+     * exact moment the shot fires — BEFORE physics.update() runs that frame —
+     * preventing the timing race where a fast pocket in the first frame would
+     * be recorded and then immediately erased by a delayed handleShotStart call.
+     * @type {function|null}
+     */
+    this.onShotFired = null;
+
     this.initEvents();
   }
 
@@ -62,9 +72,12 @@ export class AimingControls {
           // Default starting position: head string centre (or just inside kitchen for break)
           const headStringX = t.xCenter - t.width / 4;
           const startX = this.isBreakPlacement ? headStringX - 30 : headStringX;
+          console.log(`[CONTROLS] BIH: cue ball off-table, repositioning to (${startX}, ${t.yCenter}) breakPlacement=${this.isBreakPlacement}`);
           Matter.Body.setPosition(cueBall, { x: startX, y: t.yCenter });
           Matter.Body.setVelocity(cueBall, { x: 0, y: 0 });
           Matter.Body.setAngularVelocity(cueBall, 0);
+        } else {
+          console.log(`[CONTROLS] BIH: cue ball already on table at (${cueBall.position.x.toFixed(1)}, ${cueBall.position.y.toFixed(1)})`);
         }
       }
 
@@ -78,6 +91,21 @@ export class AimingControls {
         Matter.Body.set(cueBall, {
           collisionFilter: { category: 0x0001, mask: 0x0000, group: 0 }
         });
+      }
+
+      // Validate the initial placement position immediately after showing the button.
+      // Without this, cueBallPositionValid stays true (its default) even when the cue
+      // ball starts on top of a target ball — letting the player confirm an invalid spot
+      // without ever dragging.
+      if (cueBall) {
+        const pos = cueBall.position;
+        const valid = this.isValidCueBallPosition(pos.x, pos.y);
+        this.cueBallPositionValid = valid;
+        // Push state to renderer button (green → confirm enabled; red → must drag first)
+        if (this.renderer) this.renderer.updateBallInHandButton(valid);
+        if (!valid) {
+          console.log(`[CONTROLS] BIH: initial position (${pos.x.toFixed(1)},${pos.y.toFixed(1)}) overlaps a ball — confirm blocked`);
+        }
       }
     } else {
       this.hideBallInHandUI();
@@ -314,20 +342,31 @@ export class AimingControls {
 
       if (!this.isAiming || !this._dragStart || !this._initialStrokeDir) return;
 
-      // Aim rotation: world-space formula that maps drag direction to rotation direction
-      // consistently regardless of where the cue ball or aim line is pointing.
-      //   • Left→Right drag  (dx > 0, dy ≈ 0): angle < 0 → CCW  ✓
-      //   • Right→Left drag  (dx < 0, dy ≈ 0): angle > 0 → CW   ✓
-      //   • Bottom→Top drag  (dy < 0, dx ≈ 0): angle < 0 → CCW  ✓  (−dy > 0)
-      //   • Top→Bottom drag  (dy > 0, dx ≈ 0): angle > 0 → CW   ✓  (−dy < 0)
-      // Sensitivity: a drag equal to the full table width rotates the aim 90°.
+      // Aim rotation: dominant-axis world-space formula.
+      //
+      // Sign convention (screen coords, Y increases downward):
+      //   positive angle → clockwise rotation on screen
+      //   negative angle → counter-clockwise rotation on screen
+      //
+      // Desired behaviour (confirmed by user):
+      //   • Left→Right  (dx > 0)  → screen-CW   → angle = +dx * f  ✓
+      //   • Right→Left  (dx < 0)  → screen-CCW  → angle = +dx * f  ✓
+      //   • Bottom→Top  (dy < 0)  → screen-CCW  → angle = +dy * f  ✓  (dy already negative)
+      //   • Top→Bottom  (dy > 0)  → screen-CW   → angle = +dy * f  ✓
+      //
+      // For diagonal drags: only the dominant axis contributes so the rotation
+      // never mixes two axes and the gesture always feels intentional.
+      //
+      // Sensitivity: a full-table-width drag = 90° of rotation.
       const dx = x - this._dragStart.x;
       const dy = y - this._dragStart.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 2) return; // ignore micro-jitter
       const ix = this._initialStrokeDir.x;
       const iy = this._initialStrokeDir.y;
-      const angle = (dx - dy) * (Math.PI / 2) / this.config.table.width;
+      // Pick the dominant axis — whichever component has the larger absolute magnitude
+      const rotDelta = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+      const angle = rotDelta * (Math.PI / 2) / this.config.table.width;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
       this.strokeDir = {
@@ -379,10 +418,14 @@ export class AimingControls {
           const minShotSpeed = 0.8;
 
           const velocityMagnitude = minShotSpeed + currentPower * (maxShotSpeed - minShotSpeed);
-          this.physics.applyCueStroke({
-            x: this.strokeDir.x * velocityMagnitude,
-            y: this.strokeDir.y * velocityMagnitude
-          });
+
+          // Notify game engine BEFORE the stroke so shot-tracking registers are
+          // cleared at fire-time, not one physics frame later (timing race fix).
+          if (this.onShotFired) this.onShotFired();
+
+          const vel = { x: this.strokeDir.x * velocityMagnitude, y: this.strokeDir.y * velocityMagnitude };
+          console.log(`[CONTROLS] Shot fired: power=${currentPower.toFixed(2)} dir=(${this.strokeDir.x.toFixed(3)},${this.strokeDir.y.toFixed(3)}) speed=${velocityMagnitude.toFixed(2)}`);
+          this.physics.applyCueStroke(vel);
           this.physics.isBreakShot = false;
         }
       }
