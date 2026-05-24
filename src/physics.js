@@ -47,8 +47,14 @@ export class PhysicsEngine {
     this._strokeDir = { x: 1, y: 0 };
     /** Speed of the stroke at fire time — used as reference magnitude for spin impulse */
     this._strokeSpeed = 0;
-    /** True when a spin effect should be applied on the next physics update */
+    /** True when draw/follow effect should be applied on the next update tick */
     this._spinEffectQueued = false;
+    /** True when cushion-English rotation should be applied on the next update tick */
+    this._cushionEnglishQueued = false;
+    /** True when throw (spin transfer to object ball) should be applied next tick */
+    this._throwQueued = false;
+    /** The object ball body that should receive the throw impulse */
+    this._throwTarget = null;
 
     this.initTable();
     this.initPockets();
@@ -235,11 +241,17 @@ export class PhysicsEngine {
           if (!this.firstBallContactMade) {
             this.firstBallContactMade = true;
             console.log('[PHYSICS] First cue-to-ball contact registered');
-            // Queue spin effect — applied after collision response settles (next update cycle)
             const spin = this.cueBallSpin;
+            // Queue draw/follow effect (modifies cue ball path after contact)
             if (Math.abs(spin.x) > 0.05 || Math.abs(spin.y) > 0.05) {
               this._spinEffectQueued = true;
-              console.log(`[SPIN] Effect queued: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)})`);
+              console.log(`[SPIN] Draw/follow effect queued: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)})`);
+            }
+            // Queue throw (side-spin transfers to object ball, deflects it off expected line)
+            if (Math.abs(spin.x) > 0.05) {
+              this._throwQueued = true;
+              this._throwTarget = isCueA ? bodyB : bodyA;
+              console.log(`[SPIN] Throw queued: spinX=${spin.x.toFixed(2)}`);
             }
           }
         }
@@ -254,8 +266,13 @@ export class PhysicsEngine {
           this.cushionContactSet.add(bodyA.plugin.ballId);
           if (this.firstBallContactMade) this.cushionContactAfterBallHit = true;
         } else if ((isCushionA && isCueB) || (isCushionB && isCueA)) {
-          // Cue ball hitting cushion also counts after first ball contact
+          // Cue ball hitting cushion: queue English angle deflection if side spin is active.
+          // This fires for ALL cushion contacts — including pure bank shots with no object ball.
           if (this.firstBallContactMade) this.cushionContactAfterBallHit = true;
+          if (Math.abs(this.cueBallSpin.x) > 0.05) {
+            this._cushionEnglishQueued = true;
+            console.log(`[SPIN] Cushion English queued: spinX=${this.cueBallSpin.x.toFixed(2)}`);
+          }
         }
 
         // ── Pocket overlaps ───────────────────────────────────────────────────
@@ -294,11 +311,20 @@ export class PhysicsEngine {
       Matter.Engine.update(this.engine, subDt);
     }
 
-    // Apply spin effect once per shot, one full update cycle after first ball contact
-    // (gives Matter.js time to resolve the collision response before we add spin force)
+    // Apply queued spin effects one full update cycle after collision detection.
+    // The one-tick delay lets Matter.js resolve collision response first so our
+    // velocity override is not clobbered by the engine's own impulse calculations.
     if (this._spinEffectQueued) {
       this._spinEffectQueued = false;
-      this._applySpinEffect();
+      this._applySpinEffect(); // draw / follow on cue ball
+    }
+    if (this._throwQueued) {
+      this._throwQueued = false;
+      this._applyThrow(); // side-spin transfer to object ball
+    }
+    if (this._cushionEnglishQueued) {
+      this._cushionEnglishQueued = false;
+      this._applyCushionEnglish(); // English angle change off rails
     }
 
     // During Ball-in-Hand: hard-clamp cue ball velocity to zero every tick so it stays
@@ -393,6 +419,9 @@ export class PhysicsEngine {
     this.firstBallContactMade = false;
     this.cushionContactAfterBallHit = false;
     this._spinEffectQueued = false;
+    this._cushionEnglishQueued = false;
+    this._throwQueued = false;
+    this._throwTarget = null;
     const speed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2);
     // Store normalised stroke direction AND initial speed for spin effect calculations.
     // We use _strokeSpeed (not post-collision speed) so draw/follow work correctly
@@ -412,50 +441,110 @@ export class PhysicsEngine {
    * spin.x  : side/English  (−1=left, +1=right)
    * spin.y  : draw / follow (−1=follow/topspin, +1=draw/backspin)
    */
+  /**
+   * Applies draw / follow impulse to the cue ball after it contacts an object ball.
+   * Uses the original stroke speed so the effect is meaningful even on head-on shots
+   * where the cue ball transfers all momentum and stops dead (post-collision speed ≈ 0).
+   *
+   * Strength is intentionally modest (0.16 × refSpeed) — the previous value of 0.55 was
+   * too aggressive. Side-spin (spin.x) is NOT consumed here; it persists so that
+   * _applyCushionEnglish() can use it if the cue ball subsequently hits a rail.
+   */
   _applySpinEffect() {
     if (!this.cueBall || !this.cueBallSpin) return;
     const spin = this.cueBallSpin;
-    if (Math.abs(spin.x) < 0.05 && Math.abs(spin.y) < 0.05) return;
+    if (Math.abs(spin.y) < 0.05) return; // Only draw/follow here; English is handled separately
 
     const vel = this.cueBall.velocity;
-    const dir = this._strokeDir;      // Normalised stroke direction stored at fire-time
-    // CRITICAL: use _strokeSpeed (initial shot speed), NOT post-collision cue ball speed.
-    // On a head-on shot the cue ball stops dead (speed ≈ 0 after contact), so multiplying
-    // by post-collision speed gives a near-zero impulse and the effect is invisible.
-    // Using the original stroke speed gives a physically meaningful impulse every time.
-    const refSpeed = this._strokeSpeed;
-    if (refSpeed < 0.5) return; // Stroke too weak to bother
+    const dir = this._strokeDir;
+    const refSpeed = this._strokeSpeed; // Original shot speed — not post-collision speed
+    if (refSpeed < 0.5) return;
 
     let newVx = vel.x;
     let newVy = vel.y;
 
-    // Draw / Follow — impulse along the original stroke direction
-    //   spin.y > 0 → contact point below centre (draw/backspin)
-    //     Subtract forward component: cue ball reverses or slows
-    //   spin.y < 0 → contact point above centre (follow/topspin)
-    //     Add forward component: cue ball continues forward
-    if (Math.abs(spin.y) > 0.05) {
-      const drawStrength = 0.55;
-      newVx -= dir.x * spin.y * refSpeed * drawStrength;
-      newVy -= dir.y * spin.y * refSpeed * drawStrength;
-    }
+    // Draw / Follow — impulse along the original stroke direction.
+    //   spin.y > 0 → dot below centre (draw/backspin): subtract forward → ball reverses/stops
+    //   spin.y < 0 → dot above centre (follow/topspin): add forward → ball continues
+    const drawStrength = 0.16; // ~0.3× the previous 0.55 — feels natural, not overpowered
+    newVx -= dir.x * spin.y * refSpeed * drawStrength;
+    newVy -= dir.y * spin.y * refSpeed * drawStrength;
 
-    // Side spin / English — impulse perpendicular to stroke direction
-    //   spin.x > 0 → right English  |  spin.x < 0 → left English
-    //   Perpendicular to dir: (-dir.y, dir.x)
-    if (Math.abs(spin.x) > 0.05) {
-      const sideStrength = 0.25;
-      const perpX = -dir.y;
-      const perpY =  dir.x;
-      newVx += perpX * spin.x * refSpeed * sideStrength;
-      newVy += perpY * spin.x * refSpeed * sideStrength;
-    }
-
-    console.log(`[SPIN] Effect applied: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)}) refSpeed=${refSpeed.toFixed(2)} vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)})`);
+    console.log(`[SPIN] Draw/follow applied: spinY=${spin.y.toFixed(2)} refSpeed=${refSpeed.toFixed(2)} vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)})`);
     Matter.Body.setVelocity(this.cueBall, { x: newVx, y: newVy });
 
-    // Reset spin so it only fires once per shot
-    this.cueBallSpin = { x: 0, y: 0 };
+    // Consume draw/follow spin. Side-spin (x) intentionally kept alive for cushion English.
+    this.cueBallSpin = { x: spin.x, y: 0 };
+  }
+
+  /**
+   * Applies side-spin "throw" to the object ball at the moment of first cue-to-ball contact.
+   *
+   * Real physics: the spinning cue ball's surface drags against the object ball at the contact
+   * point (like gears). This deflects the OB slightly off its expected line — called "throw".
+   * Effect is small (~0.10 × strokeSpeed) but produces visibly different object ball paths.
+   *
+   * Direction: perpendicular to the stroke direction (tangent at contact).
+   *   spin.x > 0 (right English) → OB deflects in +perpendicular direction
+   *   spin.x < 0 (left English)  → OB deflects in -perpendicular direction
+   */
+  _applyThrow() {
+    if (!this._throwTarget) return;
+    const spinX = this.cueBallSpin.x;
+    if (Math.abs(spinX) < 0.05) return;
+
+    const objVel = this._throwTarget.velocity;
+    const objSpeed = Math.sqrt(objVel.x ** 2 + objVel.y ** 2);
+    if (objSpeed < 0.1) return; // OB not moving — no throw
+
+    // Perpendicular to stroke direction (tangent at ball-to-ball contact)
+    const perpX = -this._strokeDir.y;
+    const perpY =  this._strokeDir.x;
+    const throwStrength = 0.10;
+
+    const newVx = objVel.x + perpX * spinX * this._strokeSpeed * throwStrength;
+    const newVy = objVel.y + perpY * spinX * this._strokeSpeed * throwStrength;
+
+    console.log(`[SPIN] Throw applied to OB: spinX=${spinX.toFixed(2)} → OB vel (${objVel.x.toFixed(2)},${objVel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)})`);
+    Matter.Body.setVelocity(this._throwTarget, { x: newVx, y: newVy });
+    this._throwTarget = null;
+  }
+
+  /**
+   * Rotates the cue ball's post-cushion velocity by an angle proportional to side spin.
+   *
+   * Real physics: the spinning ball's rubber surface drags against the rail, changing the
+   * exit angle. Running English (spin matching natural roll off the rail) widens the angle;
+   * reverse English narrows it. We model this as a CCW velocity rotation for positive spin.x.
+   *
+   * Max deflection ≈ 15° at full English (±1.0). Spin decays 30% per rail contact,
+   * simulating the energy lost to the cushion's rubber absorption.
+   */
+  _applyCushionEnglish() {
+    if (!this.cueBall) return;
+    const spinX = this.cueBallSpin.x;
+    if (Math.abs(spinX) < 0.05) return;
+
+    const vel = this.cueBall.velocity;
+    const speed = Math.sqrt(vel.x ** 2 + vel.y ** 2);
+    if (speed < 0.5) return;
+
+    // Rotate the reflected velocity vector by angle proportional to side spin.
+    // Positive spinX (right English) → CCW rotation of velocity vector.
+    const maxAngle = 0.26; // radians ≈ 15° at full English
+    const angle = spinX * maxAngle;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+
+    const newVx = vel.x * cos - vel.y * sin;
+    const newVy = vel.x * sin + vel.y * cos;
+
+    // Decay spin ~30% per cushion contact (rubber absorbs rotational energy)
+    const decayedX = spinX * 0.70;
+    this.cueBallSpin = { x: decayedX, y: this.cueBallSpin.y };
+
+    console.log(`[SPIN] Cushion English applied: spinX=${spinX.toFixed(2)} angle=${(angle * 180 / Math.PI).toFixed(1)}° vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)}) spinX decayed→${decayedX.toFixed(2)}`);
+    Matter.Body.setVelocity(this.cueBall, { x: newVx, y: newVy });
   }
 
   /**
