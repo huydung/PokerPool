@@ -292,60 +292,13 @@ export class GameEngine {
     if (this.gameEnded) return;
 
     // ── Opponent final-turn check ─────────────────────────────────────────────
-    // If this shot was the opponent's single allowed turn after a Request End Game,
-    // trigger showdown immediately — no further dialog.
-    if (wasOpponentFinalTurn) {
+    // If this shot was the opponent's single allowed final turn after a "Request End Game",
+    // trigger showdown now. The hand-complete dialog inside processNormalPocketedBalls
+    // will have already handled the "also Request End" case if they pocketed.
+    if (wasOpponentFinalTurn && !this.gameEnded) {
       console.log('[ENDGAME] Opponent final turn complete → triggering showdown');
       this.triggerShowdown();
       return;
-    }
-
-    // ── Endgame eligibility ───────────────────────────────────────────────────
-    if (!this._endgameEligible) {
-      const h1 = (this.hands[this.player1Name] || []).length;
-      const h2 = (this.hands[this.player2Name] || []).length;
-      if (h1 >= 5 && h2 >= 5) {
-        this._endgameEligible = true;
-        console.log('[ENDGAME] Both players now hold 5-card hands — end game dialog active');
-        this.showShotToast('🎯 Both hands complete! End Game available each turn.', 'score', 4000);
-      }
-    }
-
-    // ── End-game dialog ───────────────────────────────────────────────────────
-    if (this._endgameEligible) {
-      if (this.controls) this.controls.enabled = false;
-      const decision = await this._showEndGameDialog();
-      if (this.controls) this.controls.enabled = true;
-
-      if (decision === 'end') {
-        const requester = this.activePlayer;
-        const opp = requester === this.player1Name ? this.player2Name : this.player1Name;
-
-        if (this._endGameFirstRequester !== null) {
-          // Both players want to end → showdown now
-          console.log(`[ENDGAME] ${requester} also requests end game → showdown`);
-          this.triggerShowdown();
-          return;
-        }
-
-        // First request: give opponent one final turn
-        this._endGameFirstRequester = requester;
-        this._opponentFinalTurn = true;
-        this.activePlayer = opp;
-        console.log(`[ENDGAME] ${requester} requested end game — ${opp} gets ONE final turn`);
-        this.showShotToast(`⏰ ${requester} called End Game — ${opp} gets one last shot!`, 'mixed', 4000);
-        if (this.renderer) {
-          this.renderer.setActivePlayer(this.activePlayer);
-          this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
-        }
-      } else {
-        // "Continue Shooting" — cancel any outstanding first-request (both chose to continue)
-        if (this._endGameFirstRequester !== null) {
-          console.log(`[ENDGAME] ${this.activePlayer} chose to continue — end game request by ${this._endGameFirstRequester} cancelled`);
-          this._endGameFirstRequester = null;
-          this._opponentFinalTurn = false;
-        }
-      }
     }
   }
 
@@ -452,18 +405,44 @@ export class GameEngine {
     const { cardsToAdd, ballActions, invalidReasons, anyValid } =
       await this._resolveNewCards(physics);
 
-    // Phase 2: Show ONE unified hand dialog for all new cards at once
+    // Phase 2: Add cards to hand — auto-silent if staying < 5, dialogs otherwise
     if (cardsToAdd.length > 0) {
-      console.log(`[DIALOG] Showing hand dialog for ${this.activePlayer}: newCards=[${cardsToAdd.map(c=>`${c.rank}${c.suit}`).join(',')}]`);
-      const { tokensSpent } = await this._showUnifiedHandDialog(this.activePlayer, cardsToAdd);
-      this.discardTokens[this.activePlayer] = Math.max(
-        0,
-        (this.discardTokens[this.activePlayer] ?? 0) - tokensSpent
-      );
-      console.log(`[DIALOG] Done — tokensSpent=${tokensSpent}, tokens remaining=${this.discardTokens[this.activePlayer]}, hand=[${(this.hands[this.activePlayer]||[]).map(c=>`${c.rank}${c.suit}`).join(',')}]`);
+      const hand = this.hands[this.activePlayer];
+      const projectedSize = hand.length + cardsToAdd.length;
+      console.log(`[HAND] ${this.activePlayer} hand=${hand.length} + new=${cardsToAdd.length} → projected=${projectedSize}`);
+
+      if (projectedSize < 5) {
+        // ── Auto-add silently — hand still under 5, no dialog needed ──────────
+        hand.push(...cardsToAdd);
+        console.log(`[HAND] Auto-added ${cardsToAdd.length} card(s) — hand now ${hand.length}/5`);
+
+      } else if (projectedSize === 5) {
+        // ── Exact 5 — auto-add then show "hand complete" dialog ───────────────
+        hand.push(...cardsToAdd);
+        console.log(`[HAND] Reached 5 — showing hand-complete dialog`);
+        await this._showHandCompleteDialog(this.activePlayer);
+
+      } else {
+        // ── Overflow — show discard dialog first, then hand-complete dialog ───
+        // Merge new cards into a working hand so player can choose what to drop
+        console.log(`[HAND] Overflow (${projectedSize}) — showing discard dialog`);
+        const isMultiBall = cardsToAdd.length > 1; // free discard only for multi-ball overflow
+        const { tokensSpent } = await this._showOverflowDiscardDialog(
+          this.activePlayer, cardsToAdd, isMultiBall
+        );
+        this.discardTokens[this.activePlayer] = Math.max(
+          0,
+          (this.discardTokens[this.activePlayer] ?? 0) - tokensSpent
+        );
+        console.log(`[HAND] Overflow resolved — tokensSpent=${tokensSpent} remaining=${this.discardTokens[this.activePlayer]} hand=${hand.length}`);
+        // After discarding back to 5, show the hand-complete dialog
+        if (hand.length === 5) {
+          await this._showHandCompleteDialog(this.activePlayer);
+        }
+      }
 
       // Track who first completed a full 5-card hand
-      if (this.hands[this.activePlayer].length === 5 && !this.firstToCompleteHand) {
+      if (hand.length === 5 && !this.firstToCompleteHand) {
         this.firstToCompleteHand = this.activePlayer;
       }
     }
@@ -752,6 +731,226 @@ export class GameEngine {
       };
 
       renderContent();
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // NEW CARD-FLOW DIALOGS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Shown when the player's hand overflows past 5 after a shot.
+   * Player discards until they reach exactly 5, then resolves.
+   * Multi-ball overflow is free; single-ball overflow costs a token per discard.
+   *
+   * @param {string} player
+   * @param {Array}  newCards  Cards to add (already determined by _resolveNewCards)
+   * @param {boolean} isMultiBall  True when multiple balls pocketed this shot
+   * @returns {Promise<{tokensSpent: number}>}
+   */
+  _showOverflowDiscardDialog(player, newCards, isMultiBall) {
+    return new Promise((resolve) => {
+      if (this.controls) this.controls.enabled = false;
+
+      const hand = this.hands[player];
+      const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+      const isP1 = player === this.player1Name;
+      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
+      let availableTokens = this.discardTokens[player] ?? 0;
+      let tokensSpent = 0;
+
+      // Working set = existing hand + new cards, each tagged with uid
+      let workingHand = [
+        ...hand.map((c, i) => ({ ...c, isNew: false, uid: `old_${i}` })),
+        ...newCards.map((c, i) => ({ ...c, isNew: true, uid: `new_${i}` }))
+      ];
+      let selectedUid = null;
+
+      const container = document.getElementById('game-container') || document.body;
+      const overlay = document.createElement('div');
+      overlay.className = 'discard-choice-overlay';
+      container.appendChild(overlay);
+
+      const render = () => {
+        const excess = workingHand.length - 5;
+        const freeDiscard = isMultiBall && workingHand.length > 5;
+        const canDiscard = selectedUid && (freeDiscard || availableTokens > 0);
+
+        const cardsHtml = workingHand.map(c => {
+          const r = rankLabels[c.rank] || String(c.rank);
+          const sIcon = suitSvg(c.suit, 16);
+          const red = c.suit === 'H' || c.suit === 'D';
+          const sel = c.uid === selectedUid;
+          return `<div class="discard-card-item${c.isNew?' new-card':''}${red?' red-suit':''}${sel?' selected':''}" data-uid="${c.uid}">
+            <div class="preview-top">${r}</div>
+            <div class="preview-center">${sIcon}</div>
+            <div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${r}</div>
+            ${c.isNew?'<div class="new-card-label">NEW</div>':''}
+          </div>`;
+        }).join('');
+
+        const discardLabel = freeDiscard
+          ? `Discard (Free — multi-ball shot)`
+          : `Discard (${availableTokens} token${availableTokens !== 1 ? 's' : ''} left)`;
+
+        overlay.innerHTML = `
+          <div class="discard-choice-card" style="border-color:${accentColor}40">
+            <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — TRIM YOUR HAND</div>
+            <div style="color:#ff9800;font-size:11px;text-align:center;margin-bottom:8px;">
+              Hand exceeds 5 — discard ${excess} card${excess!==1?'s':''} to continue
+            </div>
+            <div class="discard-picker-grid" id="hand-grid">${cardsHtml}</div>
+            <div class="discard-actions">
+              <button class="discard-btn-token" id="dc-discard" ${canDiscard?'':'disabled'}>${discardLabel}</button>
+            </div>
+          </div>`;
+
+        overlay.querySelectorAll('#hand-grid .discard-card-item').forEach(el => {
+          el.addEventListener('click', () => {
+            const uid = el.getAttribute('data-uid');
+            selectedUid = uid === selectedUid ? null : uid;
+            render();
+          });
+        });
+
+        const discardBtn = overlay.querySelector('#dc-discard');
+        if (discardBtn) {
+          discardBtn.addEventListener('click', () => {
+            if (!selectedUid) return;
+            const beforeSize = workingHand.length;
+            workingHand = workingHand.filter(c => c.uid !== selectedUid);
+            selectedUid = null;
+
+            // Only free when reducing genuine multi-ball overflow
+            const isFree = isMultiBall && beforeSize > 5;
+            if (!isFree) {
+              availableTokens = Math.max(0, availableTokens - 1);
+              tokensSpent++;
+              console.log(`[OVERFLOW] Token spent — ${availableTokens} remaining`);
+            } else {
+              console.log(`[OVERFLOW] Free discard (multi-ball overflow, size was ${beforeSize})`);
+            }
+
+            // Commit to real hand each step so state is always consistent
+            hand.splice(0, hand.length, ...workingHand.map(c => ({ rank: c.rank, suit: c.suit })));
+
+            if (workingHand.length <= 5) {
+              // Done discarding — close and resolve
+              overlay.style.opacity = '0';
+              setTimeout(() => {
+                overlay.remove();
+                if (this.controls) this.controls.enabled = true;
+                resolve({ tokensSpent });
+              }, 200);
+            } else {
+              render();
+            }
+          });
+        }
+      };
+
+      render();
+    });
+  }
+
+  /**
+   * Shown every time a player's hand reaches exactly 5 cards.
+   * Displays all 5 cards, the hand ranking, and offers
+   * "Request End" (trigger endgame) or "Continue Playing".
+   *
+   * @param {string} player
+   * @returns {Promise<void>}
+   */
+  _showHandCompleteDialog(player) {
+    return new Promise((resolve) => {
+      if (this.controls) this.controls.enabled = false;
+
+      const hand = this.hands[player] || [];
+      const tokens = this.discardTokens[player] ?? 0;
+      const isP1 = player === this.player1Name;
+      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
+      const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+
+      // Evaluate the hand ranking
+      const handResult = hand.length === 5 ? evaluatePokerHand(hand) : null;
+      const rankingName = handResult?.name || 'Unknown Hand';
+
+      const cardsHtml = hand.map(c => {
+        const r = rankLabels[c.rank] || String(c.rank);
+        const sIcon = suitSvg(c.suit, 18);
+        const red = c.suit === 'H' || c.suit === 'D';
+        return `<div class="discard-card-item${red?' red-suit':''}">
+          <div class="preview-top">${r}</div>
+          <div class="preview-center">${sIcon}</div>
+          <div class="preview-top" style="transform:rotate(180deg);align-self:flex-end">${r}</div>
+        </div>`;
+      }).join('');
+
+      const container = document.getElementById('game-container') || document.body;
+      const overlay = document.createElement('div');
+      overlay.className = 'discard-choice-overlay';
+      container.appendChild(overlay);
+
+      // Determine if this is actually the opponent's final turn
+      const isFinalTurn = this._opponentFinalTurn && player === this.activePlayer;
+      const endBtnLabel = isFinalTurn ? '⚔ End Game Now' : '⚔ Request End Game';
+      const continueLabel = isFinalTurn ? '🎱 Take My Last Shot' : '🎱 Continue Playing';
+
+      overlay.innerHTML = `
+        <div class="discard-choice-card" style="border-color:${accentColor}60;max-width:420px">
+          <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — HAND COMPLETE!</div>
+          <div style="color:#ffd700;font-size:15px;font-weight:700;text-align:center;margin:6px 0 12px;">
+            ♠ ${rankingName}
+          </div>
+          <div class="discard-picker-grid" style="justify-content:center;margin-bottom:14px">${cardsHtml}</div>
+          <div style="color:#8ab4d4;font-size:11px;text-align:center;line-height:1.5;margin-bottom:16px;padding:0 8px;">
+            You have a full hand. You can <strong style="color:#ff6b6b">Request End Game</strong> — your opponent gets
+            one final turn to build their hand, then it's showdown. Or <strong style="color:#4fc3f7">Continue Playing</strong>
+            to improve your hand${tokens>0?` (${tokens} replacement chance${tokens!==1?'s':''} left)`:''}.<br>
+            ${tokens===0?'<span style="color:#ff9800">⚠ No replacements left — you can still play but cannot swap cards</span>':''}
+          </div>
+          <div class="discard-actions" style="gap:10px">
+            <button class="discard-btn-token" id="hc-end" style="background:linear-gradient(135deg,#b71c1c,#7f0000);border-color:#c62828">${endBtnLabel}</button>
+            <button class="discard-btn-add" id="hc-continue">${continueLabel}</button>
+          </div>
+        </div>`;
+
+      const close = () => {
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+          overlay.remove();
+          if (this.controls) this.controls.enabled = true;
+          resolve();
+        }, 250);
+      };
+
+      overlay.querySelector('#hc-end').addEventListener('click', async () => {
+        close();
+        await Promise.resolve(); // let the overlay close before continuing
+        const opponent = player === this.player1Name ? this.player2Name : this.player1Name;
+        if (this._opponentFinalTurn) {
+          // Opponent was already given their final turn and also clicked Request End → showdown
+          console.log(`[ENDGAME] ${player} also requests end → immediate showdown`);
+          this.triggerShowdown();
+        } else {
+          console.log(`[ENDGAME] ${player} requests end → giving ${opponent} one final turn`);
+          this._endGameFirstRequester = player;
+          this._opponentFinalTurn = true;
+          this.showShotToast(`⚔ ${player} requests end game — ${opponent} gets one final turn!`, 'score', 4000);
+        }
+      });
+
+      overlay.querySelector('#hc-continue').addEventListener('click', () => {
+        console.log(`[ENDGAME] ${player} continues playing`);
+        // If opponent had given their final turn and this player chose to continue,
+        // reset the final-turn flag so the flow doesn't cascade into a showdown
+        if (this._opponentFinalTurn && player !== this._endGameFirstRequester) {
+          this._opponentFinalTurn = false;
+          this._endGameFirstRequester = null;
+          console.log(`[ENDGAME] Opponent's final turn skipped — resetting endgame flags`);
+        }
+        close();
+      });
     });
   }
 
@@ -1345,60 +1544,8 @@ export class GameEngine {
     this._updateCheatFinishButton(physics);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Shows the "Request End Game / Continue Shooting" dialog that appears at the
-   * start of each player's turn when both hands are complete (5 cards each).
-   *
-   * @returns {Promise<'end'|'continue'>}
-   */
-  _showEndGameDialog() {
-    return new Promise((resolve) => {
-      const player = this.activePlayer;
-      const isFinal = this._opponentFinalTurn;         // This is the opponent's final allowed turn
-      const firstReq = this._endGameFirstRequester;     // Who first requested (if anyone)
-      const isP1 = player === this.player1Name;
-      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
-
-      const headerText = isFinal
-        ? `⏰ FINAL TURN — ${player.toUpperCase()}`
-        : `🏁 BOTH HANDS FULL`;
-
-      const bodyText = isFinal
-        ? `${firstReq} called End Game. This is your last chance to shoot — or end it now.`
-        : `Both players have 5-card hands. Call the showdown or keep shooting?`;
-
-      const container = document.getElementById('game-container') || document.body;
-      const overlay = document.createElement('div');
-      overlay.className = 'endgame-dialog-overlay';
-      overlay.innerHTML = `
-        <div class="endgame-dialog-card" style="border-color:${accentColor}60">
-          <div class="endgame-dialog-title" style="color:${accentColor}">${headerText}</div>
-          <div class="endgame-dialog-player">${player.toUpperCase()}</div>
-          <div class="endgame-dialog-body">${bodyText}</div>
-          <div class="endgame-dialog-actions">
-            <button class="endgame-btn-end" id="eg-end">⚔ Request End Game</button>
-            <button class="endgame-btn-continue" id="eg-continue">🎱 Continue Shooting</button>
-          </div>
-        </div>
-      `;
-      container.appendChild(overlay);
-
-      console.log(`[ENDGAME] Dialog shown for ${player} (isFinal=${isFinal} firstRequester=${firstReq})`);
-
-      document.getElementById('eg-end').addEventListener('click', () => {
-        overlay.remove();
-        console.log(`[ENDGAME] ${player} chose → Request End Game`);
-        resolve('end');
-      });
-      document.getElementById('eg-continue').addEventListener('click', () => {
-        overlay.remove();
-        console.log(`[ENDGAME] ${player} chose → Continue Shooting`);
-        resolve('continue');
-      });
-    });
-  }
+  // _showEndGameDialog removed — end-game choice is now inside _showHandCompleteDialog
+  // which is triggered whenever a player's hand reaches exactly 5 cards.
 
   /** @deprecated HTML button — now replaced by Pixi right panel */
   _injectRulesButton(container) {

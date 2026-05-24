@@ -80,6 +80,9 @@ async function initSandbox() {
   // Renderer Finish Shot button → execute the cheat shot
   renderer.onCheatFinishShot = () => game.executeCheatShot(physics, executePocketOverlap);
 
+  // Right panel clicks are dispatched directly from controls.js via
+  // renderer.handleRightPanelClick(x, y) — no extra listener needed here.
+
   // Start the match by triggering the virtual coin toss
   await game.startMatch(controls, renderer);
 

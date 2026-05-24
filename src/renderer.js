@@ -866,57 +866,18 @@ export class CanvasRenderer {
 
     rp.addChild(toggleBtn);
 
-    // ── Native DOM listener — bypasses Pixi hit-testing entirely ─────────
-    // Pixi v8's Container hit-testing can silently miss clicks; a raw DOM
-    // pointerdown on the canvas with manual position math is rock-solid.
-    // controls.js already returns early for x >= rightPanelLeft, so there
-    // is no conflict with aiming or BIH placement.
-    this.app.canvas.addEventListener('pointerdown', (e) => {
-      const rect = this.app.canvas.getBoundingClientRect();
-      const scaleX = this.config.canvas.width  / rect.width;
-      const scaleY = this.config.canvas.height / rect.height;
-      const x = (e.clientX - rect.left) * scaleX;
-      const y = (e.clientY - rect.top)  * scaleY;
+    // ── Store geometry for handleRightPanelClick() called from main.js ───
+    // The native DOM listener is NOT added here — it's added by main.js on
+    // renderer.app.canvas so it uses the proven-working canvas reference and
+    // fires in the same order as controls.js (both added post-init).
+    this._rpPanelX  = panelX;
+    this._rpCx      = cx;
+    this._rpYTop    = yTop;
+    this._rpToggleY = toggleY;
+    this._rpQCirc   = qCirc;
+    this._rpICirc   = iCirc;
 
-      if (x < panelX) return; // not in the right panel strip
-
-      const dx = x - cx;
-
-      // "?" button  (radius 18 px hit zone for easy tapping)
-      if (Math.sqrt(dx * dx + (y - (yTop + 20)) ** 2) <= 18) {
-        console.log('[RENDERER] ? button clicked (native DOM)');
-        qCirc.tint = 0xdddddd;
-        setTimeout(() => { qCirc.tint = 0xffffff; }, 150);
-        if (this.onRulesRequest) this.onRulesRequest();
-        return;
-      }
-
-      // "i" button
-      if (Math.sqrt(dx * dx + (y - (yTop + 62)) ** 2) <= 18) {
-        console.log('[RENDERER] i button clicked (native DOM)');
-        iCirc.tint = 0xdddddd;
-        setTimeout(() => { iCirc.tint = 0xffffff; }, 150);
-        window.open('https://huydung.com', '_blank');
-        return;
-      }
-
-      // CHEAT toggle pill  (full pill area ± 16 px vertically)
-      if (Math.abs(y - toggleY) <= 16) {
-        this._cheatEnabled = !this._cheatEnabled;
-        this._redrawCheatToggle(this._cheatEnabled);
-        stateText.text = this._cheatEnabled ? 'ON' : 'OFF';
-        stateText.style.fill = this._cheatEnabled ? 0x001a00 : 0x6b8cae;
-        console.log(`[RENDERER] Cheat toggle (native DOM) → ${this._cheatEnabled ? 'ON' : 'OFF'} (onCheatToggle wired=${!!this.onCheatToggle})`);
-        if (this.onCheatToggle) {
-          this.onCheatToggle(this._cheatEnabled);
-        } else {
-          console.warn('[RENDERER] onCheatToggle callback not wired');
-        }
-        return;
-      }
-    });
-
-    console.log(`[RENDERER] Right panel drawn (native DOM events): panelX=${panelX} cx=${cx} yTop=${yTop} toggleY=${toggleY}`);
+    console.log(`[RENDERER] Right panel drawn: panelX=${panelX} cx=${cx} yTop=${yTop} toggleY=${toggleY}`);
   }
 
   /**
@@ -931,6 +892,66 @@ export class CanvasRenderer {
     p.roundRect(-w / 2, -h / 2, w, h, h / 2);
     p.fill({ color: enabled ? 0x00c853 : 0x1a2e44 });
     p.stroke({ color: enabled ? 0x00e676 : 0x2a4460, width: 1.5 });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RIGHT PANEL — click dispatcher called from main.js native DOM listener
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Called by the native DOM pointerdown listener in main.js with already-
+   * converted canvas coordinates (same math as controls.js getCanvasCoordinates).
+   * Checks which right-panel element was hit and fires the appropriate action.
+   * @param {number} x  Canvas-space x coordinate
+   * @param {number} y  Canvas-space y coordinate
+   */
+  handleRightPanelClick(x, y) {
+    const { _rpPanelX: panelX, _rpCx: cx, _rpYTop: yTop,
+            _rpToggleY: toggleY, _rpQCirc: qCirc, _rpICirc: iCirc } = this;
+
+    if (!panelX) {
+      console.warn('[RENDERER] handleRightPanelClick called before drawRightPanel');
+      return;
+    }
+
+    if (x < panelX) return; // safety guard (main.js also checks, but be defensive)
+
+    const dx = x - cx;
+
+    // "?" button — 18 px hit radius
+    if (Math.sqrt(dx * dx + (y - (yTop + 20)) ** 2) <= 18) {
+      console.log('[RENDERER] ? button hit');
+      if (qCirc) { qCirc.tint = 0xdddddd; setTimeout(() => { qCirc.tint = 0xffffff; }, 150); }
+      if (this.onRulesRequest) this.onRulesRequest();
+      return;
+    }
+
+    // "i" button — 18 px hit radius
+    if (Math.sqrt(dx * dx + (y - (yTop + 62)) ** 2) <= 18) {
+      console.log('[RENDERER] i button hit');
+      if (iCirc) { iCirc.tint = 0xdddddd; setTimeout(() => { iCirc.tint = 0xffffff; }, 150); }
+      window.open('https://huydung.com', '_blank');
+      return;
+    }
+
+    // CHEAT toggle pill — ±16 px vertically
+    if (Math.abs(y - toggleY) <= 16) {
+      this._cheatEnabled = !this._cheatEnabled;
+      this._redrawCheatToggle(this._cheatEnabled);
+      if (this._cheatToggleLabel) {
+        this._cheatToggleLabel.text = this._cheatEnabled ? 'ON' : 'OFF';
+        this._cheatToggleLabel.style.fill = this._cheatEnabled ? 0x001a00 : 0x6b8cae;
+      }
+      console.log(`[RENDERER] Cheat toggle → ${this._cheatEnabled ? 'ON' : 'OFF'} (onCheatToggle wired=${!!this.onCheatToggle})`);
+      if (this.onCheatToggle) {
+        this.onCheatToggle(this._cheatEnabled);
+      } else {
+        console.warn('[RENDERER] onCheatToggle not wired');
+      }
+      return;
+    }
+
+    console.log(`[RENDERER] Right panel click at y=${y.toFixed(0)} — no button matched (toggleY=${toggleY} yTop=${yTop})`);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

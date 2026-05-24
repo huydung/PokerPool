@@ -297,10 +297,16 @@ export class AimingControls {
       this.currentMousePos = { x, y };
 
       // ── Right panel guard — MUST be first: applies in ALL states (BIH, aim, etc.)
-      // The renderer owns a native DOM listener that handles ?, i, and CHEAT clicks.
+      // controls.js already has the correct canvas coords AND the renderer reference,
+      // so we dispatch directly instead of relying on a second event listener chain.
       const rightPanelLeft = this.config.canvas.width - 56;
       if (x >= rightPanelLeft) {
-        console.log(`[CONTROLS] Click in right panel area (x=${x.toFixed(0)}) — deferring to renderer`);
+        console.log(`[CONTROLS] Right panel click x=${x.toFixed(0)} y=${y.toFixed(0)} — dispatching to renderer`);
+        if (this.renderer && this.renderer.handleRightPanelClick) {
+          this.renderer.handleRightPanelClick(x, y);
+        } else {
+          console.warn('[CONTROLS] renderer.handleRightPanelClick not available');
+        }
         return;
       }
 
