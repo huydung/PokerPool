@@ -530,9 +530,9 @@ export class PhysicsEngine {
     if (speed < 0.5) return;
 
     // Rotate the reflected velocity vector by angle proportional to side spin.
-    // Positive spinX (right English) → CCW rotation of velocity vector.
-    const maxAngle = 0.26; // radians ≈ 15° at full English
-    const angle = spinX * maxAngle;
+    // Negative sign: positive spinX (right English) → CW rotation (correct physical direction).
+    const maxAngle = 0.78; // radians ≈ 45° at full English (scales linearly with spin amount)
+    const angle = -spinX * maxAngle;
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
 
