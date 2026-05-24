@@ -6,14 +6,226 @@ import { CONFIG } from './config.js';
 import { GameEngine } from './game.js';
 import { AIPlayer } from './ai.js';
 
-// ── AI mode detection ─────────────────────────────────────────────────────────
-// Append ?ai to the URL to play against the AI, e.g. http://localhost:5173/?ai
-const urlParams = new URLSearchParams(window.location.search);
-const AI_MODE = urlParams.has('ai') || urlParams.get('mode') === 'ai';
-console.log(`[MAIN] Mode: ${AI_MODE ? 'Player vs AI' : 'Player vs Player'}`);
+// ── Pool-themed AI name pool ──────────────────────────────────────────────────
+const AI_NAMES = [
+  'The Shark', 'Lucky Louie', 'Slick Rick', 'Diamond Dan',
+  'Eight-Ball Edna', "Rack 'em Rosa", 'Hustler Hank', 'Pocket Pete',
+  'The Surgeon', 'Cue-Ball Carl', 'Bandit Billy', 'Silky Sam',
+  'Ace McCoy', 'The Viper', 'Steady Eddie', 'Checkered Charlie',
+];
 
 /**
- * Orchestrates and coordinates the Poker Pool physics sandbox
+ * Shows the start screen inside #game-container and returns a promise that
+ * resolves with { mode, p1Name, p2Name }.
+ * - mode === '2p'  → two human players
+ * - mode === 'ai'  → player vs AI (p2Name is the generated AI name)
+ *
+ * @param {HTMLElement} container
+ * @returns {Promise<{mode: '2p'|'ai', p1Name: string, p2Name: string}>}
+ */
+function showStartScreen(container) {
+  return new Promise((resolve) => {
+    console.log('[MAIN] Showing start screen');
+
+    // ── Build overlay ────────────────────────────────────────────────────────
+    const overlay = document.createElement('div');
+    overlay.id = 'start-screen-overlay';
+    overlay.style.cssText = `
+      position: absolute; inset: 0; z-index: 9000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, #1a3a1a 0%, #0a1a0a 70%, #050d05 100%);
+      font-family: 'Segoe UI', sans-serif;
+    `;
+
+    overlay.innerHTML = `
+      <div id="ss-panel" style="
+        background: linear-gradient(160deg, #1e2e1e 0%, #141e14 100%);
+        border: 2px solid #3a5a3a;
+        border-radius: 16px;
+        box-shadow: 0 0 40px rgba(0,255,80,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
+        padding: 36px 40px 32px;
+        min-width: 340px;
+        max-width: 420px;
+        text-align: center;
+      ">
+        <div style="font-size: 48px; margin-bottom: 8px;">🎱</div>
+        <h1 style="
+          color: #7fff7f; font-size: 26px; margin: 0 0 4px;
+          text-shadow: 0 0 12px rgba(127,255,127,0.6);
+          letter-spacing: 2px; text-transform: uppercase;
+        ">Poker Pool</h1>
+        <p style="color: #5a8a5a; font-size: 13px; margin: 0 0 28px; letter-spacing: 1px;">
+          Best poker hand wins the rack
+        </p>
+
+        <!-- Mode buttons -->
+        <div id="ss-mode-select" style="display: flex; gap: 14px; justify-content: center; margin-bottom: 28px;">
+          <button id="ss-btn-2p" style="
+            flex: 1; padding: 14px 10px; border-radius: 10px; border: 2px solid #3a5a3a;
+            background: #1e3a1e; color: #7fff7f; font-size: 15px; font-weight: 700;
+            cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
+          ">👥 2 Players</button>
+          <button id="ss-btn-ai" style="
+            flex: 1; padding: 14px 10px; border-radius: 10px; border: 2px solid #3a5a3a;
+            background: #1e3a1e; color: #7fff7f; font-size: 15px; font-weight: 700;
+            cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
+          ">🤖 vs AI</button>
+        </div>
+
+        <!-- Name entry (hidden until mode selected) -->
+        <div id="ss-name-entry" style="display: none;">
+          <div id="ss-name-fields"></div>
+          <button id="ss-start-btn" style="
+            margin-top: 20px; width: 100%; padding: 13px;
+            border-radius: 10px; border: 2px solid #5aaa5a;
+            background: linear-gradient(180deg, #2a5a2a 0%, #1a3a1a 100%);
+            color: #9fff9f; font-size: 16px; font-weight: 700;
+            cursor: pointer; letter-spacing: 1px; text-transform: uppercase;
+            box-shadow: 0 0 16px rgba(90,200,90,0.25);
+            transition: all 0.2s;
+          ">🎱 Start Game</button>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(overlay);
+
+    // ── Hover effects ────────────────────────────────────────────────────────
+    const styleHover = (btn) => {
+      btn.addEventListener('mouseenter', () => {
+        btn.style.background = '#2a5a2a';
+        btn.style.borderColor = '#5aaa5a';
+        btn.style.boxShadow = '0 0 14px rgba(90,200,90,0.3)';
+      });
+      btn.addEventListener('mouseleave', () => {
+        if (!btn.classList.contains('ss-selected')) {
+          btn.style.background = '#1e3a1e';
+          btn.style.borderColor = '#3a5a3a';
+          btn.style.boxShadow = '';
+        }
+      });
+    };
+
+    const btn2p = document.getElementById('ss-btn-2p');
+    const btnAI = document.getElementById('ss-btn-ai');
+    const nameEntry = document.getElementById('ss-name-entry');
+    const nameFields = document.getElementById('ss-name-fields');
+    const startBtn  = document.getElementById('ss-start-btn');
+    styleHover(btn2p);
+    styleHover(btnAI);
+
+    const inputStyle = `
+      width: 100%; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #3a5a3a; background: #0e1e0e;
+      color: #9fff9f; font-size: 15px; outline: none;
+      box-sizing: border-box;
+    `;
+    const labelStyle = `
+      display: block; text-align: left; margin-bottom: 5px;
+      color: #5a9a5a; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+    `;
+
+    // ── Select 2-player mode ─────────────────────────────────────────────────
+    let selectedMode = null;
+
+    const selectMode = (mode) => {
+      selectedMode = mode;
+      // Highlight selected button
+      [btn2p, btnAI].forEach(b => {
+        b.classList.remove('ss-selected');
+        b.style.background = '#1e3a1e';
+        b.style.borderColor = '#3a5a3a';
+        b.style.boxShadow = '';
+      });
+      const activeBtn = mode === '2p' ? btn2p : btnAI;
+      activeBtn.classList.add('ss-selected');
+      activeBtn.style.background = '#2a5a2a';
+      activeBtn.style.borderColor = '#7fff7f';
+      activeBtn.style.boxShadow = '0 0 14px rgba(127,255,127,0.4)';
+
+      // Build name fields
+      if (mode === '2p') {
+        nameFields.innerHTML = `
+          <div style="margin-bottom: 14px;">
+            <label style="${labelStyle}">Player 1 Name</label>
+            <input id="ss-p1" type="text" placeholder="Alice" maxlength="20" style="${inputStyle}" value="Alice"/>
+          </div>
+          <div>
+            <label style="${labelStyle}">Player 2 Name</label>
+            <input id="ss-p2" type="text" placeholder="Bob" maxlength="20" style="${inputStyle}" value="Bob"/>
+          </div>
+        `;
+      } else {
+        const aiName = AI_NAMES[Math.floor(Math.random() * AI_NAMES.length)];
+        nameFields.innerHTML = `
+          <div style="margin-bottom: 14px;">
+            <label style="${labelStyle}">Your Name</label>
+            <input id="ss-p1" type="text" placeholder="Alice" maxlength="20" style="${inputStyle}" value="Alice"/>
+          </div>
+          <div style="
+            padding: 10px 12px; border-radius: 8px;
+            border: 1px solid #3a5a3a; background: #0e1e0e;
+            color: #5a9a5a; font-size: 14px; text-align: left;
+          ">
+            🤖 You'll face <strong style="color:#9fff9f">${aiName}</strong>
+            <input id="ss-ai-name" type="hidden" value="${aiName}"/>
+          </div>
+        `;
+      }
+
+      nameEntry.style.display = 'block';
+
+      // Focus first input
+      const firstInput = document.getElementById('ss-p1');
+      if (firstInput) {
+        setTimeout(() => firstInput.focus(), 50);
+        firstInput.select();
+      }
+
+      console.log(`[MAIN] Mode selected: ${mode}`);
+    };
+
+    btn2p.addEventListener('click', () => selectMode('2p'));
+    btnAI.addEventListener('click', () => selectMode('ai'));
+
+    // ── Start game ───────────────────────────────────────────────────────────
+    const doStart = () => {
+      if (!selectedMode) return;
+
+      const p1Input = document.getElementById('ss-p1');
+      const p1Name = (p1Input?.value.trim()) || 'Alice';
+
+      let p2Name;
+      if (selectedMode === '2p') {
+        const p2Input = document.getElementById('ss-p2');
+        p2Name = (p2Input?.value.trim()) || 'Bob';
+      } else {
+        const aiNameInput = document.getElementById('ss-ai-name');
+        p2Name = aiNameInput?.value || AI_NAMES[0];
+      }
+
+      console.log(`[MAIN] Starting game — mode: ${selectedMode}, P1: "${p1Name}", P2: "${p2Name}"`);
+
+      // Fade out and resolve
+      overlay.style.transition = 'opacity 0.4s ease';
+      overlay.style.opacity = '0';
+      setTimeout(() => {
+        overlay.remove();
+        resolve({ mode: selectedMode, p1Name, p2Name });
+      }, 420);
+    };
+
+    startBtn.addEventListener('click', doStart);
+
+    // Allow Enter key in inputs to start
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && selectedMode) doStart();
+    });
+  });
+}
+
+/**
+ * Orchestrates and coordinates the Poker Pool physics sandbox.
  */
 async function initSandbox() {
   const container = document.getElementById('game-container');
@@ -21,6 +233,16 @@ async function initSandbox() {
     console.error('Error: #game-container element not found');
     return;
   }
+
+  // ── 0. Show mode/name selection start screen ──────────────────────────────
+  const { mode, p1Name, p2Name } = await showStartScreen(container);
+
+  const isAIMode = mode === 'ai';
+  console.log(`[MAIN] Mode: ${isAIMode ? 'Player vs AI' : 'Player vs Player'} | P1: "${p1Name}" | P2: "${p2Name}"`);
+
+  // Patch config with chosen names before any game objects read it
+  CONFIG.rules.player1Name = p1Name;
+  CONFIG.rules.player2Name = p2Name;
 
   // 1. Create the physics simulator
   const physics = new PhysicsEngine(CONFIG);
@@ -31,9 +253,9 @@ async function initSandbox() {
 
   // 1c. Create AI player if in AI mode
   let aiPlayer = null;
-  if (AI_MODE) {
-    aiPlayer = new AIPlayer(CONFIG, game.player2Name);
-    // Tell game.js which player name is AI so dialogs auto-resolve for it
+  if (isAIMode) {
+    // AI is always player 2 so the human gets the break
+    aiPlayer = new AIPlayer(CONFIG, p2Name);
     game._aiPlayerName = aiPlayer.playerName;
     console.log(`[MAIN] AI player created: ${aiPlayer.playerName}`);
   }
@@ -99,8 +321,11 @@ async function initSandbox() {
   // Right panel clicks are dispatched directly from controls.js via
   // renderer.handleRightPanelClick(x, y) — no extra listener needed here.
 
-  // Start the match by triggering the virtual coin toss
-  await game.startMatch(controls, renderer);
+  // ── Start the match ───────────────────────────────────────────────────────
+  // In AI mode the human player (P1) always gets the break shot —
+  // pass their name as forcedWinner to skip the random coin toss.
+  const forcedWinner = isAIMode ? p1Name : null;
+  await game.startMatch(controls, renderer, forcedWinner);
 
   // After coin toss: breaking player places cue ball anywhere in the kitchen
   controls.isBreakPlacement = true;
@@ -129,13 +354,8 @@ async function initSandbox() {
     }, 900);
   };
 
-  // ── If AI won the coin toss, it breaks first ──────────────────────────────
-  if (aiPlayer && game.activePlayer === aiPlayer.playerName) {
-    console.log('[MAIN] AI won coin toss — scheduling break shot');
-    setTimeout(() => {
-      if (!game.gameEnded) maybeStartAITurn();
-    }, 1200);
-  }
+  // Note: In AI mode the human always breaks, so no need to check if AI won toss.
+  // The AI's first turn will be triggered naturally after the human's break ends.
 
   let isShotActive = false;
 

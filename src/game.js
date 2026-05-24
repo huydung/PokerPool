@@ -148,8 +148,14 @@ export class GameEngine {
 
   /**
    * Triggers the coin toss overlay and sets the starting active player.
+   *
+   * @param {AimingControls} controls
+   * @param {CanvasRenderer} renderer
+   * @param {string|null}    forcedWinner  When provided, skip the random toss and
+   *                                       declare this player the winner (used for
+   *                                       AI mode where the human always breaks).
    */
-  startMatch(controls, renderer) {
+  startMatch(controls, renderer, forcedWinner = null) {
     this.controls = controls;
     this.renderer = renderer;
     this.renderer.gameRef = this;
@@ -158,8 +164,9 @@ export class GameEngine {
       this.isTossing = true;
       this.controls.enabled = false;
 
-      const winner = Math.random() < 0.5 ? this.player1Name : this.player2Name;
+      const winner = forcedWinner ?? (Math.random() < 0.5 ? this.player1Name : this.player2Name);
       this.activePlayer = winner;
+      console.log(`[GAME] Coin toss winner: ${winner}${forcedWinner ? ' (forced — AI mode, human breaks)' : ' (random)'}`);
 
       const container = document.getElementById('game-container') || document.body;
 

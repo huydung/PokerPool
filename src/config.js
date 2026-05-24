@@ -44,7 +44,7 @@ export const CONFIG = {
     /** @type {number} Radius of the pocket sensors in pixels */
     radius: 26,
     /** @type {number} Collision buffer/offset to place side pockets slightly outward */
-    sideOffset: 15
+    sideOffset: 18
   },
 
   // ==========================================
