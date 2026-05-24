@@ -21,7 +21,12 @@ export class AimingControls {
     // Interaction states
     this.isAiming = false;             // true while pointer is held for aim-rotation drag
     this.isDraggingSlider = false;     // true while pointer is dragging the power slider
+    this._isDraggingSpinUI = false;    // true while pointer is dragging the spin/English circle
     this._prevOrbitalAngle = undefined; // angle (rad) from cue ball to pointer at last frame
+
+    // ── Spin / English contact point ──────────────────────────────────────────
+    /** Contact-point offset within the cue ball face: x ∈ [-1,1], y ∈ [-1,1] */
+    this.spinOffset = { x: 0, y: 0 };
     this._sliderDragStartY = 0;        // Y coordinate where slider drag began
     this._sliderDragStartPower = 0;    // powerRatio at the moment slider drag began
     this.currentMousePos = { x: 512, y: 338 }; // Centered default
@@ -330,6 +335,16 @@ export class AimingControls {
         return; // cheat click consumes the event; no aiming or slider
       }
 
+      // ── Spin UI — drag on the English/contact-point circle ──────────────────
+      // Available any time balls are stopped and player is not aiming or on BIH.
+      if (this._isInsideSpinUI(x, y)) {
+        this._isDraggingSpinUI = true;
+        this.activePointerId = e.pointerId;
+        this._updateSpinFromPointer(x, y);
+        console.log(`[SPIN_UI] Drag start at (${x.toFixed(0)},${y.toFixed(0)}) → spin=(${this.spinOffset.x.toFixed(2)},${this.spinOffset.y.toFixed(2)})`);
+        return;
+      }
+
       // ── Power slider ────────────────────────────────────────────────────────
       if (this._isInsideSlider(x, y)) {
         this.isDraggingSlider = true;
@@ -367,6 +382,11 @@ export class AimingControls {
 
       const allStopped = this.physics.areAllBallsStopped();
       if (!allStopped) return;
+
+      if (this._isDraggingSpinUI) {
+        this._updateSpinFromPointer(x, y);
+        return;
+      }
 
       if (this.isDraggingSlider) {
         this._updatePowerFromSliderDelta(y);
@@ -422,6 +442,13 @@ export class AimingControls {
         return;
       }
 
+      // Spin UI drag release
+      if (this._isDraggingSpinUI) {
+        this._isDraggingSpinUI = false;
+        console.log(`[SPIN_UI] Drag ended — spin=(${this.spinOffset.x.toFixed(2)},${this.spinOffset.y.toFixed(2)})`);
+        return;
+      }
+
       // Aim drag release → lock direction, do NOT fire
       if (this.isAiming) {
         this.isAiming = false;
@@ -459,10 +486,16 @@ export class AimingControls {
           // cleared at fire-time, not one physics frame later (timing race fix).
           if (this.onShotFired) this.onShotFired();
 
+          // Pass spin offset to physics for draw/follow/English effects
+          this.physics.cueBallSpin = { ...this.spinOffset };
+          console.log(`[CONTROLS] Shot fired: power=${currentPower.toFixed(2)} dir=(${this.strokeDir.x.toFixed(3)},${this.strokeDir.y.toFixed(3)}) speed=${velocityMagnitude.toFixed(2)} spin=(${this.spinOffset.x.toFixed(2)},${this.spinOffset.y.toFixed(2)})`);
+
           const vel = { x: this.strokeDir.x * velocityMagnitude, y: this.strokeDir.y * velocityMagnitude };
-          console.log(`[CONTROLS] Shot fired: power=${currentPower.toFixed(2)} dir=(${this.strokeDir.x.toFixed(3)},${this.strokeDir.y.toFixed(3)}) speed=${velocityMagnitude.toFixed(2)}`);
           this.physics.applyCueStroke(vel);
           this.physics.isBreakShot = false;
+
+          // Reset spin to centre after each shot
+          this.spinOffset = { x: 0, y: 0 };
         }
       }
     });
@@ -476,6 +509,29 @@ export class AimingControls {
     const buf = s.touchBuffer ?? 20;
     return x >= s.x - buf && x <= s.x + s.width + buf &&
            y >= s.y - buf && y <= s.y + s.height + buf;
+  }
+
+  /**
+   * Returns true when (x, y) is within the spin/English selector circle.
+   */
+  _isInsideSpinUI(x, y) {
+    const { x: cx, y: cy, radius } = this.config.spinUi;
+    const dx = x - cx, dy = y - cy;
+    return Math.sqrt(dx * dx + dy * dy) <= radius + 4; // +4px touch buffer
+  }
+
+  /**
+   * Updates spinOffset based on the pointer's position relative to the spin UI centre.
+   * The offset is clamped to a unit circle so spin values stay in [-1, 1].
+   */
+  _updateSpinFromPointer(x, y) {
+    const { x: cx, y: cy, radius } = this.config.spinUi;
+    let dx = (x - cx) / radius;
+    let dy = (y - cy) / radius;
+    // Clamp to unit circle
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 1) { dx /= len; dy /= len; }
+    this.spinOffset = { x: parseFloat(dx.toFixed(3)), y: parseFloat(dy.toFixed(3)) };
   }
 
   /**

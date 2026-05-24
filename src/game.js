@@ -69,14 +69,14 @@ export class GameEngine {
     this.isTossing = false;
     this.gameEnded = false;
 
-    // Discard token system
-    const startTokens = this.config.rules?.discardTokens ?? 3;
+    // Discard tokens are REMOVED from game rules — kept as stub for legacy HUD calls only
     this.discardTokens = {
-      [this.player1Name]: startTokens,
-      [this.player2Name]: startTokens
+      [this.player1Name]: 0,
+      [this.player2Name]: 0
     };
 
-    // Lock state: a player is locked when they have 5 cards AND 0 tokens
+    // Lock state: a player is locked when they have 5 cards AND choose to stop
+    // (lock logic kept for backwards compat but tokens no longer gate it)
     this.lockedPlayers = {
       [this.player1Name]: false,
       [this.player2Name]: false
@@ -87,6 +87,13 @@ export class GameEngine {
 
     // Tiebreaker tracking
     this.firstToCompleteHand = null;
+
+    // ── Hand completion tracking ───────────────────────────────────────────────
+    /** True once a player has FIRST reached 5 cards (so hand-complete dialog fires once) */
+    this._handCompleted = {
+      [this.player1Name]: false,
+      [this.player2Name]: false
+    };
 
     // Card hands
     this.hands = {
@@ -252,6 +259,8 @@ export class GameEngine {
 
     // Capture before processing — opponent may take their final turn this shot
     const wasOpponentFinalTurn = this._opponentFinalTurn;
+    /** Who's turn it was when the shot was fired (used for turn-start prompt detection) */
+    const playerWhoJustShot = this.activePlayer;
 
     console.log(`[SHOT_END] player=${this.activePlayer} break=${this.isBreakShot} scratch=${this.cueBallScratchThisShot} pocketed=[${this.pocketedBallsThisShot.join(',')}] firstContact=${physics.firstBallContactMade} cushionAfter=${physics.cushionContactAfterBallHit}`);
 
@@ -299,6 +308,35 @@ export class GameEngine {
       console.log('[ENDGAME] Opponent final turn complete → triggering showdown');
       this.triggerShowdown();
       return;
+    }
+
+    // ── Turn-start endgame prompt ─────────────────────────────────────────────
+    // When the ACTIVE PLAYER CHANGED this shot resolution AND the incoming player
+    // already has a complete 5-card hand, prompt them before they shoot.
+    // This handles the case where Player A completed a hand earlier, chose
+    // "Continue Playing", and now control has returned to them from the opponent.
+    const activePlayerChanged = (this.activePlayer !== playerWhoJustShot);
+    if (activePlayerChanged &&
+        (this.hands[this.activePlayer]?.length ?? 0) >= 5 &&
+        !this._opponentFinalTurn &&
+        !this.gameEnded) {
+      console.log(`[TURN_START] ${this.activePlayer} has 5 cards at turn start — showing endgame prompt`);
+      const choice = await this._showTurnStartEndgamePrompt(this.activePlayer);
+      if (choice === 'end' && !this.gameEnded) {
+        const opponent = this.opponent;
+        this._endGameFirstRequester = this.activePlayer;
+        this._opponentFinalTurn = true;
+        this.activePlayer = opponent;
+        console.log(`[ENDGAME] ${this._endGameFirstRequester} requests End Game via turn-start prompt → ${opponent} gets final turn`);
+        this.showShotToast(
+          `⏰ ${this._endGameFirstRequester} requests End Game — ${opponent} gets one final turn!`,
+          'score', 4000
+        );
+        if (this.renderer) {
+          this.renderer.setActivePlayer(this.activePlayer);
+          this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
+        }
+      }
     }
   }
 
@@ -415,36 +453,34 @@ export class GameEngine {
       console.log(`[HAND] ${this.activePlayer} hand=${hand.length} + new=${cardsToAdd.length} → projected=${projectedSize}`);
 
       if (projectedSize < 5) {
-        // ── Auto-add silently — hand still under 5, no dialog needed ──────────
+        // ── Auto-add silently — hand still under 5 ────────────────────────────
         hand.push(...cardsToAdd);
         console.log(`[HAND] Auto-added ${cardsToAdd.length} card(s) — hand now ${hand.length}/5`);
 
       } else if (projectedSize === 5) {
-        // ── Exact 5 — auto-add then show "hand complete" dialog ───────────────
+        // ── Exactly 5 — auto-add ──────────────────────────────────────────────
         hand.push(...cardsToAdd);
-        console.log(`[HAND] Reached 5 — showing hand-complete dialog`);
-        await this._showHandCompleteDialog(this.activePlayer);
+        console.log(`[HAND] Reached 5 — hand complete`);
+        // Show hand-complete dialog only the FIRST time this player reaches 5 cards
+        if (!this._handCompleted[this.activePlayer]) {
+          this._handCompleted[this.activePlayer] = true;
+          await this._showHandCompleteDialog(this.activePlayer);
+        }
 
       } else {
-        // ── Overflow — show discard dialog first, then hand-complete dialog ───
-        // Merge new cards into a working hand so player can choose what to drop
-        console.log(`[HAND] Overflow (${projectedSize}) — showing discard dialog`);
-        const isMultiBall = cardsToAdd.length > 1; // free discard only for multi-ball overflow
-        const { tokensSpent } = await this._showOverflowDiscardDialog(
-          this.activePlayer, cardsToAdd, isMultiBall
-        );
-        this.discardTokens[this.activePlayer] = Math.max(
-          0,
-          (this.discardTokens[this.activePlayer] ?? 0) - tokensSpent
-        );
-        console.log(`[HAND] Overflow resolved — tokensSpent=${tokensSpent} remaining=${this.discardTokens[this.activePlayer]} hand=${hand.length}`);
-        // After discarding back to 5, show the hand-complete dialog
-        if (hand.length === 5) {
+        // ── Overflow (already had 5 cards, or multi-ball gave >5) ─────────────
+        // Free swap dialog: player picks which card(s) to drop (no token cost).
+        console.log(`[HAND] Overflow (projected ${projectedSize}) — showing free swap dialog`);
+        await this._showOverflowDiscardDialog(this.activePlayer, cardsToAdd);
+        console.log(`[HAND] Overflow resolved — hand now ${hand.length} cards`);
+        // Show hand-complete dialog only the FIRST time they reach exactly 5
+        if (hand.length === 5 && !this._handCompleted[this.activePlayer]) {
+          this._handCompleted[this.activePlayer] = true;
           await this._showHandCompleteDialog(this.activePlayer);
         }
       }
 
-      // Track who first completed a full 5-card hand
+      // Track who first completed a full 5-card hand (tiebreaker)
       if (hand.length === 5 && !this.firstToCompleteHand) {
         this.firstToCompleteHand = this.activePlayer;
       }
@@ -757,15 +793,13 @@ export class GameEngine {
 
   /**
    * Shown when the player's hand overflows past 5 after a shot.
-   * Player discards until they reach exactly 5, then resolves.
-   * Multi-ball overflow is free; single-ball overflow costs a token per discard.
+   * All discards are FREE — no token cost. Player discards until hand = 5, then resolves.
    *
    * @param {string} player
    * @param {Array}  newCards  Cards to add (already determined by _resolveNewCards)
-   * @param {boolean} isMultiBall  True when multiple balls pocketed this shot
-   * @returns {Promise<{tokensSpent: number}>}
+   * @returns {Promise<void>}
    */
-  _showOverflowDiscardDialog(player, newCards, isMultiBall) {
+  _showOverflowDiscardDialog(player, newCards) {
     return new Promise((resolve) => {
       if (this.controls) this.controls.enabled = false;
 
@@ -773,8 +807,6 @@ export class GameEngine {
       const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
       const isP1 = player === this.player1Name;
       const accentColor = isP1 ? '#00e5ff' : '#e040fb';
-      let availableTokens = this.discardTokens[player] ?? 0;
-      let tokensSpent = 0;
 
       // Working set = existing hand + new cards, each tagged with uid
       let workingHand = [
@@ -790,8 +822,7 @@ export class GameEngine {
 
       const render = () => {
         const excess = workingHand.length - 5;
-        const freeDiscard = isMultiBall && workingHand.length > 5;
-        const canDiscard = selectedUid && (freeDiscard || availableTokens > 0);
+        const canDiscard = !!selectedUid; // Always free — just need a selection
 
         const cardsHtml = workingHand.map(c => {
           const r = rankLabels[c.rank] || String(c.rank);
@@ -806,19 +837,15 @@ export class GameEngine {
           </div>`;
         }).join('');
 
-        const discardLabel = freeDiscard
-          ? `Discard (Free — multi-ball shot)`
-          : `Discard (${availableTokens} token${availableTokens !== 1 ? 's' : ''} left)`;
-
         overlay.innerHTML = `
           <div class="discard-choice-card" style="border-color:${accentColor}40">
-            <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — TRIM YOUR HAND</div>
+            <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — ADJUST YOUR HAND</div>
             <div style="color:#ff9800;font-size:11px;text-align:center;margin-bottom:8px;">
-              Hand exceeds 5 — discard ${excess} card${excess!==1?'s':''} to continue
+              Hand exceeds 5 — discard ${excess} card${excess!==1?'s':''} (free)
             </div>
             <div class="discard-picker-grid" id="hand-grid">${cardsHtml}</div>
             <div class="discard-actions">
-              <button class="discard-btn-token" id="dc-discard" ${canDiscard?'':'disabled'}>${discardLabel}</button>
+              <button class="discard-btn-token" id="dc-discard" ${canDiscard?'':'disabled'}>Discard Selected (Free)</button>
             </div>
           </div>`;
 
@@ -834,30 +861,19 @@ export class GameEngine {
         if (discardBtn) {
           discardBtn.addEventListener('click', () => {
             if (!selectedUid) return;
-            const beforeSize = workingHand.length;
             workingHand = workingHand.filter(c => c.uid !== selectedUid);
             selectedUid = null;
-
-            // Only free when reducing genuine multi-ball overflow
-            const isFree = isMultiBall && beforeSize > 5;
-            if (!isFree) {
-              availableTokens = Math.max(0, availableTokens - 1);
-              tokensSpent++;
-              console.log(`[OVERFLOW] Token spent — ${availableTokens} remaining`);
-            } else {
-              console.log(`[OVERFLOW] Free discard (multi-ball overflow, size was ${beforeSize})`);
-            }
+            console.log(`[OVERFLOW] Free discard — working hand now ${workingHand.length} cards`);
 
             // Commit to real hand each step so state is always consistent
             hand.splice(0, hand.length, ...workingHand.map(c => ({ rank: c.rank, suit: c.suit })));
 
             if (workingHand.length <= 5) {
-              // Done discarding — close and resolve
               overlay.style.opacity = '0';
               setTimeout(() => {
                 overlay.remove();
                 if (this.controls) this.controls.enabled = true;
-                resolve({ tokensSpent });
+                resolve();
               }, 200);
             } else {
               render();
@@ -871,9 +887,9 @@ export class GameEngine {
   }
 
   /**
-   * Shown every time a player's hand reaches exactly 5 cards.
+   * Shown the FIRST TIME a player's hand reaches exactly 5 cards.
    * Displays all 5 cards, the hand ranking, and offers
-   * "Request End" (trigger endgame) or "Continue Playing".
+   * "Request End Game" (trigger endgame) or "Continue Playing".
    *
    * @param {string} player
    * @returns {Promise<void>}
@@ -883,7 +899,6 @@ export class GameEngine {
       if (this.controls) this.controls.enabled = false;
 
       const hand = this.hands[player] || [];
-      const tokens = this.discardTokens[player] ?? 0;
       const isP1 = player === this.player1Name;
       const accentColor = isP1 ? '#00e5ff' : '#e040fb';
       const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
@@ -915,9 +930,8 @@ export class GameEngine {
       const bodyText = isFinalTurn
         ? `⏰ <strong style="color:#ff9800">${this._endGameFirstRequester}</strong> called End Game — this is your final turn.<br>
            Showdown happens after this shot regardless.`
-        : `You have a full hand. <strong style="color:#ff6b6b">Request End Game</strong> — your opponent gets one final turn, then showdown.
-           Or <strong style="color:#4fc3f7">Continue Playing</strong> to improve your hand
-           ${tokens > 0 ? `(${tokens} swap${tokens !== 1 ? 's' : ''} left)` : '— <span style="color:#ff9800">no swaps left</span>'}.`;
+        : `You have a full 5-card hand! <strong style="color:#ff6b6b">Request End Game</strong> — your opponent gets one final turn, then showdown.
+           Or <strong style="color:#4fc3f7">Continue Playing</strong> to freely swap cards whenever you pocket a new ball.`;
 
       // Final-turn: only one button (showdown is inevitable).
       // Normal: two buttons — Request End Game / Continue Playing.
@@ -979,15 +993,91 @@ export class GameEngine {
   }
 
   /**
-   * Checks whether the given player is now locked (5 cards, 0 tokens) and triggers if so.
+   * Shows a compact, non-blocking endgame prompt at the top-centre of the screen
+   * when a player with a complete 5-card hand is about to start their turn.
+   * The player can Request End Game (opponent gets one final turn) or Continue Shooting.
+   *
+   * Unlike the full-screen hand-complete dialog, this sits just below the HUD so
+   * the player can see the full table while deciding.
+   *
+   * @param {string} player  Active player who is about to shoot
+   * @returns {Promise<'end'|'continue'>}
+   */
+  _showTurnStartEndgamePrompt(player) {
+    return new Promise((resolve) => {
+      if (this.controls) this.controls.enabled = false;
+
+      const hand = this.hands[player] || [];
+      const handResult = hand.length > 0 ? evaluatePokerHand(hand) : null;
+      const handLabel = handResult?.label || 'Complete Hand';
+      const isP1 = player === this.player1Name;
+      const accentColor = isP1 ? '#00e5ff' : '#e040fb';
+
+      console.log(`[TURN_START_PROMPT] Showing for ${player} — ${handLabel}`);
+
+      const container = document.getElementById('game-container') || document.body;
+
+      // Remove any stale prompt that wasn't cleaned up
+      container.querySelector('.turn-start-endgame-prompt')?.remove();
+
+      const prompt = document.createElement('div');
+      prompt.className = 'turn-start-endgame-prompt';
+      prompt.style.cssText = `
+        position: absolute;
+        top: 95px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(8, 15, 33, 0.96);
+        border: 1.5px solid ${accentColor};
+        border-radius: 12px;
+        padding: 10px 16px 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 7px;
+        z-index: 600;
+        min-width: 300px;
+        box-shadow: 0 0 24px ${accentColor}55, 0 4px 16px rgba(0,0,0,0.7);
+        font-family: 'Inter', Arial, sans-serif;
+        pointer-events: auto;
+      `;
+
+      prompt.innerHTML = `
+        <div style="color:${accentColor};font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">${player}'s Turn</div>
+        <div style="color:#ffd700;font-size:13px;font-weight:700;">♠ ${handLabel}</div>
+        <div style="color:#7a9ab8;font-size:10px;text-align:center;line-height:1.4;">You have a complete hand. Continue shooting freely, or request showdown?</div>
+        <div style="display:flex;gap:8px;width:100%;margin-top:2px;">
+          <button id="tsp-end" style="flex:1;background:linear-gradient(135deg,#7f0000,#3d0000);color:#ff8a80;border:1px solid #c62828;border-radius:8px;padding:7px 6px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:0.5px;font-family:inherit;">⚔ Request End Game</button>
+          <button id="tsp-continue" style="flex:1;background:linear-gradient(135deg,#0d4f0d,#052205);color:#a5d6a7;border:1px solid #2e7d32;border-radius:8px;padding:7px 6px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:0.5px;font-family:inherit;">🎱 Continue Shooting</button>
+        </div>
+      `;
+
+      container.appendChild(prompt);
+
+      const close = (choice) => {
+        prompt.style.opacity = '0';
+        prompt.style.transition = 'opacity 0.18s';
+        setTimeout(() => {
+          prompt.remove();
+          if (this.controls) this.controls.enabled = true;
+          resolve(choice);
+        }, 180);
+      };
+
+      prompt.querySelector('#tsp-end').addEventListener('click', () => close('end'));
+      prompt.querySelector('#tsp-continue').addEventListener('click', () => close('continue'));
+    });
+  }
+
+  /**
+   * Checks whether lock conditions are met.
+   * With tokens removed, lock is no longer auto-triggered by empty tokens.
+   * Lock is now only triggered explicitly by the endgame flow (future: Request Showdown).
+   * This stub remains so the call site in processNormalPocketedBalls still compiles.
    */
   _checkAndTriggerLock(player) {
-    if (this.gameEnded) return;
-    const hand = this.hands[player] || [];
-    const tokens = this.discardTokens[player] ?? 0;
-    if (hand.length === 5 && tokens === 0 && !this.lockedPlayers[player]) {
-      this.triggerLock(player);
-    }
+    // Lock auto-trigger disabled — endgame is handled by the Request End Game flow.
+    // If both players have 5 cards and one requests End Game, showdown triggers normally.
   }
 
   /**

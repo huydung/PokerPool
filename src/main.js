@@ -114,6 +114,9 @@ async function initSandbox() {
     // Step D: Render the power indicator slider (driven by slider drag)
     renderer.drawPowerSlider(controls.isDraggingSlider, controls.powerRatio);
 
+    // Step D2: Update spin/English indicator dot position
+    renderer.updateSpinUI(controls.spinOffset);
+
     // Step E: Manage shot lifecycle turn-transitions and break evaluations
     const allStopped = physics.areAllBallsStopped();
     if (!isShotActive && !allStopped) {

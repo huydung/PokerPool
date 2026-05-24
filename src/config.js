@@ -179,6 +179,18 @@ export const CONFIG = {
   // GAME RULES & PLAYERS
   // ==========================================
   
+  // ==========================================
+  // SPIN / ENGLISH UI (contact-point selector)
+  // ==========================================
+  spinUi: {
+    /** @type {number} Canvas X center of the spin circle (right of power slider) */
+    x: 75,
+    /** @type {number} Canvas Y center of the spin circle (below table area) */
+    y: 546,
+    /** @type {number} Radius of the spin selector circle in pixels */
+    radius: 24
+  },
+
   rules: {
     /** @type {string} Name of Player 1 */
     player1Name: 'Alice',

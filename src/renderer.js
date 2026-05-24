@@ -25,6 +25,14 @@ export class CanvasRenderer {
 
     // Mapping: Matter.js body ID -> Pixi Container
     this.ballViews = new Map();
+    /** Maps bodyId → the seam sub-container that rotates to simulate rolling */
+    this._ballSeamContainers = new Map();
+    /** Maps bodyId → accumulated roll angle (radians) for the rolling visual */
+    this._ballRollAngles = new Map();
+    /** Pixi Graphics dot inside the spin UI — updated each frame */
+    this._spinUiDot = null;
+    /** Container holding all static spin UI graphics */
+    this._spinUiContainer = new Container();
     
     // Pocket graphic references for diagnostic glowing
     this.pocketGraphics = [];
@@ -116,6 +124,7 @@ export class CanvasRenderer {
     this.app.stage.addChild(this.hudContainer);
     this.app.stage.addChild(this.sliderGraphics); // Top-level glassmorphic slider overlay
     this.app.stage.addChild(this.uiContainer);    // Floating Pixi UI (BIH confirm button, etc.)
+    this.app.stage.addChild(this._spinUiContainer); // Spin/English selector (always on top of table)
     this.app.stage.addChild(this.rightPanelContainer); // always-on-top right icon panel
 
     this.aimContainer.addChild(this.aimGraphics);
@@ -123,6 +132,7 @@ export class CanvasRenderer {
     this.drawTableLayout();
     this.drawHUDLayout();
     this.drawRightPanel();
+    this.drawSpinUI();
   }
 
   /**
@@ -556,33 +566,57 @@ export class CanvasRenderer {
     // Clear any previous ball containers
     this.ballContainer.removeChildren();
     this.ballViews.clear();
+    this._ballSeamContainers.clear();
+    this._ballRollAngles.clear();
 
     const { radius } = this.config.ball;
 
-    // 1. Helper to render a glossy 3D pool ball
+    /**
+     * Builds a glossy pool-ball Pixi Container.
+     * Returns { container, seamContainer } — seamContainer rotates independently
+     * to create a convincing rolling animation while the rank label stays upright.
+     */
     const buildBallGraphics = (color, textChar, isWildcard = false) => {
       const container = new Container();
 
-      // Colored ball base circle
+      // ── Seam layer: rotates each frame to simulate rolling ─────────────────
+      // Consists of a subtle curved line across the ball, giving the impression
+      // of the ball's surface spinning as it moves.
+      const seamContainer = new Container();
+
+      const seam1 = new Graphics();
+      // Curved seam line (slightly off-centre for 3D realism)
+      seam1.moveTo(-radius * 0.85, -radius * 0.15);
+      seam1.lineTo( radius * 0.85,  radius * 0.15);
+      seam1.stroke({ color: 0x000000, alpha: 0.18, width: 1.2 });
+      seamContainer.addChild(seam1);
+
+      // Accent dot on the seam (helps show rotation clearly)
+      const seamDot = new Graphics();
+      seamDot.circle(radius * 0.6, radius * 0.1, 1.8);
+      seamDot.fill({ color: 0x000000, alpha: 0.20 });
+      seamContainer.addChild(seamDot);
+
+      container.addChild(seamContainer);
+
+      // ── Colored ball base circle ────────────────────────────────────────────
       const base = new Graphics();
       base.circle(0, 0, radius);
-      
       if (isWildcard) {
-        // Metallic Gold Gradient feel
         base.fill({ color: 0xffd700 });
       } else {
-        base.fill({ color: color });
+        base.fill({ color });
       }
-      base.stroke({ color: 0x000000, width: 1.5 }); // Distinct black outline around all balls
+      base.stroke({ color: 0x000000, width: 1.5 });
       container.addChild(base);
 
-      // Inner glossy shine overlay
+      // ── Inner glossy shine overlay (static — light always from upper-left) ──
       const shine = new Graphics();
       shine.circle(-radius * 0.35, -radius * 0.35, radius * 0.4);
       shine.fill({ color: 0xffffff, alpha: 0.25 });
       container.addChild(shine);
 
-      // Card Rank overlay circle & text (if not cue ball)
+      // ── Card rank overlay (always stays upright — NOT inside seamContainer) ─
       if (textChar !== null) {
         const overlay = new Graphics();
         overlay.circle(0, 0, radius * 0.62);
@@ -599,11 +633,9 @@ export class CanvasRenderer {
 
         const label = new Text({ text: textChar, style: labelStyle });
         label.anchor.set(0.5);
-        label.x = 0;
-        label.y = 0;
         container.addChild(label);
 
-        // Add visual underline decoration for 6 and 9 pool balls on the table felt
+        // Underline decoration for 6 and 9
         if (textChar === '6' || textChar === '9') {
           const underline = new Graphics();
           underline.rect(-4, 4.5, 8, 1.5);
@@ -612,27 +644,33 @@ export class CanvasRenderer {
         }
       }
 
-      return container;
+      return { container, seamContainer };
     };
 
-    // 2. Render Cue Ball (Solid White, Glossy, No Overlay text)
-    const cueView = buildBallGraphics(this.config.visuals.colors.cueBall, null);
+    // ── Cue Ball (white, no rank label) ──────────────────────────────────────
+    const { container: cueView, seamContainer: cueSeam } = buildBallGraphics(this.config.visuals.colors.cueBall, null);
     this.ballViews.set(cueBall.id, cueView);
+    this._ballSeamContainers.set(cueBall.id, cueSeam);
+    this._ballRollAngles.set(cueBall.id, 0);
     this.ballContainer.addChild(cueView);
 
-    // 3. Render 15 target card balls
+    // ── 15 target card balls ──────────────────────────────────────────────────
     const cardRanks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', '★', '★'];
-    
+
     targetBalls.forEach((ball) => {
       const idx = ball.plugin.ballId - 1;
       const color = this.config.visuals.colors.balls[idx] || 0xffffff;
       const rankText = cardRanks[idx] || '?';
       const isWild = (idx === 13 || idx === 14);
 
-      const ballView = buildBallGraphics(color, rankText, isWild);
+      const { container: ballView, seamContainer: ballSeam } = buildBallGraphics(color, rankText, isWild);
       this.ballViews.set(ball.id, ballView);
+      this._ballSeamContainers.set(ball.id, ballSeam);
+      this._ballRollAngles.set(ball.id, 0);
       this.ballContainer.addChild(ballView);
     });
+
+    console.log(`[RENDERER] Created ${targetBalls.length + 1} ball views with rolling seam layers`);
   }
 
   /**
@@ -641,21 +679,44 @@ export class CanvasRenderer {
    * @param {Array<Matter.Body>} targetBalls Array of physical target balls
    */
   syncPositions(cueBall, targetBalls) {
+    const radius = this.config.ball.radius;
+    const dt = 1 / 60; // Approximate frame time (matches Pixi ticker at 60 fps)
+
+    /**
+     * Updates a single ball view: position + rolling seam rotation.
+     * The seam sub-container rotates based on accumulated linear speed so the
+     * ball appears to roll realistically without requiring Matter.js angular physics.
+     */
+    const syncBall = (body, view) => {
+      view.x = body.position.x;
+      view.y = body.position.y;
+      // Main container stays unrotated so the rank label is always upright
+      view.rotation = 0;
+
+      // Accumulate roll angle from linear speed (arc-length / radius)
+      const vel = body.velocity;
+      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y);
+      if (speed > 0.05) {
+        const prev = this._ballRollAngles.get(body.id) ?? 0;
+        // Roll direction: velocity angle rotated 90° (ball surface motion is perpendicular to travel)
+        // For a top-down view the most natural convention is: moving right → CW rotation
+        const rollDelta = speed * dt / radius;
+        const newAngle = (prev + rollDelta) % (Math.PI * 2);
+        this._ballRollAngles.set(body.id, newAngle);
+
+        const seam = this._ballSeamContainers.get(body.id);
+        if (seam) seam.rotation = newAngle;
+      }
+    };
+
     if (cueBall && this.ballViews.has(cueBall.id)) {
-      const view = this.ballViews.get(cueBall.id);
-      view.x = cueBall.position.x;
-      view.y = cueBall.position.y;
-      view.rotation = cueBall.angle;
-      // Show/Hide based on existence/sinking
-      view.visible = true;
+      syncBall(cueBall, this.ballViews.get(cueBall.id));
+      this.ballViews.get(cueBall.id).visible = true;
     }
 
     targetBalls.forEach((ball) => {
       if (this.ballViews.has(ball.id)) {
-        const view = this.ballViews.get(ball.id);
-        view.x = ball.position.x;
-        view.y = ball.position.y;
-        view.rotation = ball.angle;
+        syncBall(ball, this.ballViews.get(ball.id));
       }
     });
   }
@@ -1033,6 +1094,95 @@ export class CanvasRenderer {
       this._cheatFinishBtn.destroy({ children: true });
       this._cheatFinishBtn = null;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SPIN / ENGLISH UI
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Draws the static spin/English selector: a small circle representing the cue ball
+   * face with crosshairs and zone labels. The draggable indicator dot is positioned
+   * by updateSpinUI() each frame. Called once from init().
+   */
+  drawSpinUI() {
+    const { x: cx, y: cy, radius: r } = this.config.spinUi;
+    const c = this._spinUiContainer;
+    c.removeChildren();
+
+    // ── Background circle ─────────────────────────────────────────────────────
+    const bg = new Graphics();
+    bg.circle(cx, cy, r);
+    bg.fill({ color: 0x0a0f22, alpha: 0.82 });
+    bg.stroke({ color: 0x3a4a6a, width: 1.5 });
+    c.addChild(bg);
+
+    // ── Zone tint: top half (follow) and bottom half (draw) ──────────────────
+    const topZone = new Graphics();
+    topZone.arc(cx, cy, r - 1, Math.PI, 0); // top semicircle
+    topZone.lineTo(cx, cy);
+    topZone.fill({ color: 0x004488, alpha: 0.20 }); // blue tint = follow
+    c.addChild(topZone);
+
+    const botZone = new Graphics();
+    botZone.arc(cx, cy, r - 1, 0, Math.PI); // bottom semicircle
+    botZone.lineTo(cx, cy);
+    botZone.fill({ color: 0x662200, alpha: 0.20 }); // red tint = draw
+    c.addChild(botZone);
+
+    // ── Crosshairs ────────────────────────────────────────────────────────────
+    const cross = new Graphics();
+    cross.moveTo(cx - r, cy); cross.lineTo(cx + r, cy);
+    cross.moveTo(cx, cy - r); cross.lineTo(cx, cy + r);
+    cross.stroke({ color: 0x556688, alpha: 0.4, width: 0.8 });
+    c.addChild(cross);
+
+    // ── Zone labels (tiny) ────────────────────────────────────────────────────
+    const labelStyle = new TextStyle({
+      fontFamily: 'Arial', fontSize: 7, fill: 0x8ab4d4, fontWeight: 'bold'
+    });
+    const mkLabel = (txt, lx, ly) => {
+      const t = new Text({ text: txt, style: labelStyle });
+      t.anchor.set(0.5);
+      t.x = lx; t.y = ly;
+      c.addChild(t);
+    };
+    mkLabel('↑ Follow', cx, cy - r + 7);
+    mkLabel('↓ Draw',   cx, cy + r - 6);
+    mkLabel('L', cx - r + 5, cy);
+    mkLabel('R', cx + r - 5, cy);
+
+    // ── "SPIN" caption above the circle ──────────────────────────────────────
+    const capStyle = new TextStyle({ fontFamily: 'Arial', fontSize: 8, fill: 0x6688aa, letterSpacing: 1 });
+    const cap = new Text({ text: 'SPIN', style: capStyle });
+    cap.anchor.set(0.5);
+    cap.x = cx; cap.y = cy - r - 8;
+    c.addChild(cap);
+
+    // ── Indicator dot (starts at centre) ─────────────────────────────────────
+    const dot = new Graphics();
+    dot.circle(cx, cy, 5);
+    dot.fill({ color: 0x00e5ff });
+    dot.stroke({ color: 0xffffff, width: 1 });
+    c.addChild(dot);
+    this._spinUiDot = dot;
+
+    console.log(`[RENDERER] Spin UI drawn at (${cx}, ${cy}) r=${r}`);
+  }
+
+  /**
+   * Updates the indicator dot position each frame to reflect the current spin offset.
+   * @param {{ x: number, y: number }} spinOffset  Contact-point offset (-1..1 range)
+   */
+  updateSpinUI(spinOffset) {
+    if (!this._spinUiDot) return;
+    const { x: cx, y: cy, radius: r } = this.config.spinUi;
+    const dotRange = r - 6; // Keep dot inside the circle border
+    this._spinUiDot.x = cx + spinOffset.x * dotRange;
+    this._spinUiDot.y = cy + spinOffset.y * dotRange;
+    // Tint: center = cyan, off-center = amber
+    const dist = Math.sqrt(spinOffset.x ** 2 + spinOffset.y ** 2);
+    this._spinUiDot.tint = dist < 0.15 ? 0x00e5ff : 0xffb300;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1620,30 +1770,9 @@ export class CanvasRenderer {
       });
     }
 
-    // 3. Update text headers with cards count and token counts
-    const p1TokenCount = discardTokens?.[this.player1Name] ?? 0;
-    const p2TokenCount = discardTokens?.[this.player2Name] ?? 0;
-
-    // 3a. Update real-time poker hand label below card slots
-    // if (this.p1HandLabel) {
-    //   this.p1HandLabel.text = this._getPartialHandLabel(p1Hand);
-    // }
-
-    // if (this.p2HandLabel) {
-    //   this.p2HandLabel.text = this._getPartialHandLabel(p2Hand);
-    // }
-
-    // 4. Update token dot indicators (filled = token remaining, dim = spent)
-    for (let i = 0; i < 3; i++) {
-      if (this.p1Tokens[i]) {
-        this.p1Tokens[i].tint = i < p1TokenCount ? 0x00e5ff : 0x334155;
-        this.p1Tokens[i].alpha = i < p1TokenCount ? 1.0 : 0.3;
-      }
-      if (this.p2Tokens[i]) {
-        this.p2Tokens[i].tint = i < p2TokenCount ? 0xe040fb : 0x334155;
-        this.p2Tokens[i].alpha = i < p2TokenCount ? 1.0 : 0.3;
-      }
-    }
+    // 3. Discard tokens are removed from game rules — hide the dot indicators
+    this.p1Tokens.forEach(dot => { dot.visible = false; });
+    this.p2Tokens.forEach(dot => { dot.visible = false; })
 
     // 5. Update the turn text
     this.setActivePlayer(activePlayer);

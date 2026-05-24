@@ -40,6 +40,14 @@ export class PhysicsEngine {
     /** @type {function(Matter.Body, Matter.Body): void} Callback when two balls collide */
     this.onBallCollision = null;
 
+    // ── Spin / English system ─────────────────────────────────────────────────
+    /** Contact-point offset (-1..1 in each axis) set by controls before each shot */
+    this.cueBallSpin = { x: 0, y: 0 };
+    /** Direction of the current stroke — set in applyCueStroke for spin calculations */
+    this._strokeDir = { x: 1, y: 0 };
+    /** True when a spin effect should be applied on the next physics update */
+    this._spinEffectQueued = false;
+
     this.initTable();
     this.initPockets();
     this.initCollisionListeners();
@@ -225,6 +233,12 @@ export class PhysicsEngine {
           if (!this.firstBallContactMade) {
             this.firstBallContactMade = true;
             console.log('[PHYSICS] First cue-to-ball contact registered');
+            // Queue spin effect — applied after collision response settles (next update cycle)
+            const spin = this.cueBallSpin;
+            if (Math.abs(spin.x) > 0.05 || Math.abs(spin.y) > 0.05) {
+              this._spinEffectQueued = true;
+              console.log(`[SPIN] Effect queued: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)})`);
+            }
           }
         }
 
@@ -276,6 +290,13 @@ export class PhysicsEngine {
     const subDt = dt / subSteps;
     for (let i = 0; i < subSteps; i++) {
       Matter.Engine.update(this.engine, subDt);
+    }
+
+    // Apply spin effect once per shot, one full update cycle after first ball contact
+    // (gives Matter.js time to resolve the collision response before we add spin force)
+    if (this._spinEffectQueued) {
+      this._spinEffectQueued = false;
+      this._applySpinEffect();
     }
 
     // During Ball-in-Hand: hard-clamp cue ball velocity to zero every tick so it stays
@@ -369,10 +390,60 @@ export class PhysicsEngine {
     this.cushionContactSet.clear();
     this.firstBallContactMade = false;
     this.cushionContactAfterBallHit = false;
+    this._spinEffectQueued = false;
     const speed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2);
-    console.log(`[PHYSICS] Cue stroke applied: vx=${velocity.x.toFixed(2)} vy=${velocity.y.toFixed(2)} speed=${speed.toFixed(2)}`);
+    // Store normalised stroke direction for spin effect calculations
+    this._strokeDir = speed > 0
+      ? { x: velocity.x / speed, y: velocity.y / speed }
+      : { x: 1, y: 0 };
+    console.log(`[PHYSICS] Cue stroke applied: vx=${velocity.x.toFixed(2)} vy=${velocity.y.toFixed(2)} speed=${speed.toFixed(2)} spin=(${this.cueBallSpin.x.toFixed(2)},${this.cueBallSpin.y.toFixed(2)})`);
     // Overrides any residual velocities and guarantees 100% directional accuracy
     Matter.Body.setVelocity(this.cueBall, velocity);
+  }
+
+  /**
+   * Applies the queued spin/English effect to the cue ball.
+   * Called once per physics update cycle after first ball-ball contact.
+   * spin.x  : side/English  (−1=left, +1=right)
+   * spin.y  : draw / follow (−1=follow/topspin, +1=draw/backspin)
+   */
+  _applySpinEffect() {
+    if (!this.cueBall || !this.cueBallSpin) return;
+    const spin = this.cueBallSpin;
+    if (Math.abs(spin.x) < 0.05 && Math.abs(spin.y) < 0.05) return;
+
+    const vel   = this.cueBall.velocity;
+    const speed = Math.sqrt(vel.x ** 2 + vel.y ** 2);
+    if (speed < 0.1) return; // Ball already stopped, nothing to modify
+
+    const dir = this._strokeDir; // Normalised stroke direction stored at fire-time
+    let newVx = vel.x;
+    let newVy = vel.y;
+
+    // Draw / Follow — modifies velocity along the original stroke direction
+    // spin.y > 0 (below centre, draw): subtract forward component → ball reverses
+    // spin.y < 0 (above centre, follow): add forward component → ball continues
+    if (Math.abs(spin.y) > 0.05) {
+      const drawStrength = 0.55;
+      newVx -= dir.x * spin.y * speed * drawStrength;
+      newVy -= dir.y * spin.y * speed * drawStrength;
+    }
+
+    // Side spin / English — modifies velocity perpendicular to stroke direction
+    // Perpendicular to dir: (-dir.y, dir.x)
+    if (Math.abs(spin.x) > 0.05) {
+      const sideStrength = 0.30;
+      const perpX = -dir.y;
+      const perpY =  dir.x;
+      newVx += perpX * spin.x * speed * sideStrength;
+      newVy += perpY * spin.x * speed * sideStrength;
+    }
+
+    console.log(`[SPIN] Effect applied: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)}) vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)})`);
+    Matter.Body.setVelocity(this.cueBall, { x: newVx, y: newVy });
+
+    // Reset spin so it only fires once per shot
+    this.cueBallSpin = { x: 0, y: 0 };
   }
 
   /**
