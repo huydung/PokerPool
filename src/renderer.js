@@ -1105,84 +1105,72 @@ export class CanvasRenderer {
    * face with crosshairs and zone labels. The draggable indicator dot is positioned
    * by updateSpinUI() each frame. Called once from init().
    */
+  /**
+   * Draws the CueBallUI contact-point selector in the right panel.
+   * Designed to look like a pool cue ball — solid white with a gloss highlight.
+   * A red dot (drawn at local 0,0 so it can be repositioned correctly) is the
+   * draggable contact-point indicator.  No text labels — icon-only design.
+   */
   drawSpinUI() {
     const { x: cx, y: cy, radius: r } = this.config.spinUi;
     const c = this._spinUiContainer;
     c.removeChildren();
 
+    // ── Outer shadow ring (gives the ball depth against dark panel) ───────────
+    const shadow = new Graphics();
+    shadow.circle(cx, cy, r + 2);
+    shadow.fill({ color: 0x000000, alpha: 0.35 });
+    c.addChild(shadow);
+
     // ── White cue-ball face ───────────────────────────────────────────────────
-    const bg = new Graphics();
-    bg.circle(cx, cy, r);
-    bg.fill({ color: 0xffffff });                    // solid white — looks like a cue ball
-    bg.stroke({ color: 0xaaaaaa, width: 1 });
-    c.addChild(bg);
+    const ball = new Graphics();
+    ball.circle(cx, cy, r);
+    ball.fill({ color: 0xf8f8f8 });
+    ball.stroke({ color: 0xbbbbbb, width: 1 });
+    c.addChild(ball);
 
-    // ── Subtle zone tints on white background ─────────────────────────────────
-    const topZone = new Graphics();
-    topZone.arc(cx, cy, r - 1, Math.PI, 0);
-    topZone.lineTo(cx, cy);
-    topZone.fill({ color: 0x0055cc, alpha: 0.09 }); // faint blue = follow
-    c.addChild(topZone);
+    // ── Gloss highlight — upper-left, just like a real pool ball ─────────────
+    const gloss = new Graphics();
+    gloss.circle(cx - r * 0.32, cy - r * 0.32, r * 0.38);
+    gloss.fill({ color: 0xffffff, alpha: 0.55 });
+    c.addChild(gloss);
 
-    const botZone = new Graphics();
-    botZone.arc(cx, cy, r - 1, 0, Math.PI);
-    botZone.lineTo(cx, cy);
-    botZone.fill({ color: 0xcc2200, alpha: 0.09 }); // faint red = draw
-    c.addChild(botZone);
-
-    // ── Crosshairs (dark on white) ────────────────────────────────────────────
+    // ── Hair-thin centre crosshair (barely visible reference lines) ───────────
     const cross = new Graphics();
-    cross.moveTo(cx - r + 2, cy); cross.lineTo(cx + r - 2, cy);
-    cross.moveTo(cx, cy - r + 2); cross.lineTo(cx, cy + r - 2);
-    cross.stroke({ color: 0x888888, alpha: 0.5, width: 0.7 });
+    cross.moveTo(cx - r + 3, cy); cross.lineTo(cx + r - 3, cy);
+    cross.moveTo(cx, cy - r + 3); cross.lineTo(cx, cy + r - 3);
+    cross.stroke({ color: 0xaaaaaa, alpha: 0.30, width: 0.6 });
     c.addChild(cross);
 
-    // ── Tiny zone labels (dark text on white) ─────────────────────────────────
-    const labelStyle = new TextStyle({
-      fontFamily: 'Arial', fontSize: 6, fill: 0x444444, fontWeight: 'bold'
-    });
-    const mkLabel = (txt, lx, ly) => {
-      const t = new Text({ text: txt, style: labelStyle });
-      t.anchor.set(0.5);
-      t.x = lx; t.y = ly;
-      c.addChild(t);
-    };
-    mkLabel('Follow', cx, cy - r + 6);
-    mkLabel('Draw',   cx, cy + r - 5);
-    mkLabel('L', cx - r + 5, cy);
-    mkLabel('R', cx + r - 5, cy);
-
-    // ── "CUE BALL" caption above the circle ──────────────────────────────────
-    const capStyle = new TextStyle({ fontFamily: 'Arial', fontSize: 7, fill: 0x90a0b0, letterSpacing: 0.5 });
-    const cap = new Text({ text: 'CUE BALL', style: capStyle });
-    cap.anchor.set(0.5);
-    cap.x = cx; cap.y = cy - r - 8;
-    c.addChild(cap);
-
-    // ── Indicator dot (starts at centre) — blue on white for contrast ─────────
+    // ── Red contact-point indicator dot ──────────────────────────────────────
+    // IMPORTANT: drawn at local (0,0) so dot.x / dot.y correctly position it on stage.
     const dot = new Graphics();
-    dot.circle(cx, cy, 5);
-    dot.fill({ color: 0x1565c0 });                   // deep blue, visible on white
-    dot.stroke({ color: 0x000000, width: 0.8, alpha: 0.4 });
+    dot.circle(0, 0, 5.5);
+    dot.fill({ color: 0xee1111 });
+    dot.stroke({ color: 0x880000, width: 1 });
+    // Small inner highlight to make it look like a raised button
+    dot.circle(-1.5, -1.5, 2);
+    dot.fill({ color: 0xff6666, alpha: 0.6 });
+    // Start at ball centre
+    dot.x = cx;
+    dot.y = cy;
     c.addChild(dot);
     this._spinUiDot = dot;
 
-    console.log(`[RENDERER] Spin UI (CueBallUI) drawn at (${cx}, ${cy}) r=${r} — right panel bottom`);
+    console.log(`[RENDERER] CueBallUI drawn at (${cx}, ${cy}) r=${r}`);
   }
 
   /**
-   * Updates the indicator dot position each frame to reflect the current spin offset.
-   * @param {{ x: number, y: number }} spinOffset  Contact-point offset (-1..1 range)
+   * Moves the red contact-point dot to match the current spinOffset each frame.
+   * @param {{ x: number, y: number }} spinOffset  Contact-point offset (-1..1 each axis)
    */
   updateSpinUI(spinOffset) {
     if (!this._spinUiDot) return;
     const { x: cx, y: cy, radius: r } = this.config.spinUi;
-    const dotRange = r - 6; // Keep dot inside the circle border
+    // Keep dot inside the ball face (6 px margin from edge)
+    const dotRange = r - 6;
     this._spinUiDot.x = cx + spinOffset.x * dotRange;
     this._spinUiDot.y = cy + spinOffset.y * dotRange;
-    // Tint: centre = deep blue (neutral), off-centre = orange (spin active)
-    const dist = Math.sqrt(spinOffset.x ** 2 + spinOffset.y ** 2);
-    this._spinUiDot.tint = dist < 0.15 ? 0x1565c0 : 0xff6600;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
