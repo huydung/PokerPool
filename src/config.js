@@ -183,10 +183,10 @@ export const CONFIG = {
   // SPIN / ENGLISH UI (contact-point selector)
   // ==========================================
   spinUi: {
-    /** @type {number} Canvas X center of the spin circle (right of power slider) */
-    x: 75,
-    /** @type {number} Canvas Y center of the spin circle (below table area) */
-    y: 546,
+    /** @type {number} Canvas X center of the spin circle (centre of right panel = 1024 - 28) */
+    x: 996,
+    /** @type {number} Canvas Y center — bottom-aligned with power slider bottom (130+400=530, minus radius) */
+    y: 506,
     /** @type {number} Radius of the spin selector circle in pixels */
     radius: 24
   },

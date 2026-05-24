@@ -300,7 +300,18 @@ export class AimingControls {
       const { x, y } = this.getCanvasCoordinates(e.clientX, e.clientY);
       this.currentMousePos = { x, y };
 
-      // ── Right panel guard — MUST be first: applies in ALL states (BIH, aim, etc.)
+      // ── Spin UI — checked BEFORE the right panel guard because the spin circle
+      // sits inside the right panel area. Drag events must not be swallowed by
+      // the panel button dispatcher.
+      if (!this.hasBallInHand && !this.cheatEnabled && this._isInsideSpinUI(x, y)) {
+        this._isDraggingSpinUI = true;
+        this.activePointerId = e.pointerId;
+        this._updateSpinFromPointer(x, y);
+        console.log(`[SPIN_UI] Drag start at (${x.toFixed(0)},${y.toFixed(0)}) → spin=(${this.spinOffset.x.toFixed(2)},${this.spinOffset.y.toFixed(2)})`);
+        return;
+      }
+
+      // ── Right panel guard — MUST be before BIH/aim blocks: applies in ALL states.
       // controls.js already has the correct canvas coords AND the renderer reference,
       // so we dispatch directly instead of relying on a second event listener chain.
       const rightPanelLeft = this.config.canvas.width - 56;
@@ -333,16 +344,6 @@ export class AimingControls {
       if (this.cheatEnabled) {
         this._handleCheatClick(x, y);
         return; // cheat click consumes the event; no aiming or slider
-      }
-
-      // ── Spin UI — drag on the English/contact-point circle ──────────────────
-      // Available any time balls are stopped and player is not aiming or on BIH.
-      if (this._isInsideSpinUI(x, y)) {
-        this._isDraggingSpinUI = true;
-        this.activePointerId = e.pointerId;
-        this._updateSpinFromPointer(x, y);
-        console.log(`[SPIN_UI] Drag start at (${x.toFixed(0)},${y.toFixed(0)}) → spin=(${this.spinOffset.x.toFixed(2)},${this.spinOffset.y.toFixed(2)})`);
-        return;
       }
 
       // ── Power slider ────────────────────────────────────────────────────────

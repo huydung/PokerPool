@@ -1110,36 +1110,36 @@ export class CanvasRenderer {
     const c = this._spinUiContainer;
     c.removeChildren();
 
-    // ── Background circle ─────────────────────────────────────────────────────
+    // ── White cue-ball face ───────────────────────────────────────────────────
     const bg = new Graphics();
     bg.circle(cx, cy, r);
-    bg.fill({ color: 0x0a0f22, alpha: 0.82 });
-    bg.stroke({ color: 0x3a4a6a, width: 1.5 });
+    bg.fill({ color: 0xffffff });                    // solid white — looks like a cue ball
+    bg.stroke({ color: 0xaaaaaa, width: 1 });
     c.addChild(bg);
 
-    // ── Zone tint: top half (follow) and bottom half (draw) ──────────────────
+    // ── Subtle zone tints on white background ─────────────────────────────────
     const topZone = new Graphics();
-    topZone.arc(cx, cy, r - 1, Math.PI, 0); // top semicircle
+    topZone.arc(cx, cy, r - 1, Math.PI, 0);
     topZone.lineTo(cx, cy);
-    topZone.fill({ color: 0x004488, alpha: 0.20 }); // blue tint = follow
+    topZone.fill({ color: 0x0055cc, alpha: 0.09 }); // faint blue = follow
     c.addChild(topZone);
 
     const botZone = new Graphics();
-    botZone.arc(cx, cy, r - 1, 0, Math.PI); // bottom semicircle
+    botZone.arc(cx, cy, r - 1, 0, Math.PI);
     botZone.lineTo(cx, cy);
-    botZone.fill({ color: 0x662200, alpha: 0.20 }); // red tint = draw
+    botZone.fill({ color: 0xcc2200, alpha: 0.09 }); // faint red = draw
     c.addChild(botZone);
 
-    // ── Crosshairs ────────────────────────────────────────────────────────────
+    // ── Crosshairs (dark on white) ────────────────────────────────────────────
     const cross = new Graphics();
-    cross.moveTo(cx - r, cy); cross.lineTo(cx + r, cy);
-    cross.moveTo(cx, cy - r); cross.lineTo(cx, cy + r);
-    cross.stroke({ color: 0x556688, alpha: 0.4, width: 0.8 });
+    cross.moveTo(cx - r + 2, cy); cross.lineTo(cx + r - 2, cy);
+    cross.moveTo(cx, cy - r + 2); cross.lineTo(cx, cy + r - 2);
+    cross.stroke({ color: 0x888888, alpha: 0.5, width: 0.7 });
     c.addChild(cross);
 
-    // ── Zone labels (tiny) ────────────────────────────────────────────────────
+    // ── Tiny zone labels (dark text on white) ─────────────────────────────────
     const labelStyle = new TextStyle({
-      fontFamily: 'Arial', fontSize: 7, fill: 0x8ab4d4, fontWeight: 'bold'
+      fontFamily: 'Arial', fontSize: 6, fill: 0x444444, fontWeight: 'bold'
     });
     const mkLabel = (txt, lx, ly) => {
       const t = new Text({ text: txt, style: labelStyle });
@@ -1147,27 +1147,27 @@ export class CanvasRenderer {
       t.x = lx; t.y = ly;
       c.addChild(t);
     };
-    mkLabel('↑ Follow', cx, cy - r + 7);
-    mkLabel('↓ Draw',   cx, cy + r - 6);
+    mkLabel('Follow', cx, cy - r + 6);
+    mkLabel('Draw',   cx, cy + r - 5);
     mkLabel('L', cx - r + 5, cy);
     mkLabel('R', cx + r - 5, cy);
 
-    // ── "SPIN" caption above the circle ──────────────────────────────────────
-    const capStyle = new TextStyle({ fontFamily: 'Arial', fontSize: 8, fill: 0x6688aa, letterSpacing: 1 });
-    const cap = new Text({ text: 'SPIN', style: capStyle });
+    // ── "CUE BALL" caption above the circle ──────────────────────────────────
+    const capStyle = new TextStyle({ fontFamily: 'Arial', fontSize: 7, fill: 0x90a0b0, letterSpacing: 0.5 });
+    const cap = new Text({ text: 'CUE BALL', style: capStyle });
     cap.anchor.set(0.5);
     cap.x = cx; cap.y = cy - r - 8;
     c.addChild(cap);
 
-    // ── Indicator dot (starts at centre) ─────────────────────────────────────
+    // ── Indicator dot (starts at centre) — blue on white for contrast ─────────
     const dot = new Graphics();
     dot.circle(cx, cy, 5);
-    dot.fill({ color: 0x00e5ff });
-    dot.stroke({ color: 0xffffff, width: 1 });
+    dot.fill({ color: 0x1565c0 });                   // deep blue, visible on white
+    dot.stroke({ color: 0x000000, width: 0.8, alpha: 0.4 });
     c.addChild(dot);
     this._spinUiDot = dot;
 
-    console.log(`[RENDERER] Spin UI drawn at (${cx}, ${cy}) r=${r}`);
+    console.log(`[RENDERER] Spin UI (CueBallUI) drawn at (${cx}, ${cy}) r=${r} — right panel bottom`);
   }
 
   /**
@@ -1180,9 +1180,9 @@ export class CanvasRenderer {
     const dotRange = r - 6; // Keep dot inside the circle border
     this._spinUiDot.x = cx + spinOffset.x * dotRange;
     this._spinUiDot.y = cy + spinOffset.y * dotRange;
-    // Tint: center = cyan, off-center = amber
+    // Tint: centre = deep blue (neutral), off-centre = orange (spin active)
     const dist = Math.sqrt(spinOffset.x ** 2 + spinOffset.y ** 2);
-    this._spinUiDot.tint = dist < 0.15 ? 0x00e5ff : 0xffb300;
+    this._spinUiDot.tint = dist < 0.15 ? 0x1565c0 : 0xff6600;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
