@@ -45,6 +45,8 @@ export class PhysicsEngine {
     this.cueBallSpin = { x: 0, y: 0 };
     /** Direction of the current stroke — set in applyCueStroke for spin calculations */
     this._strokeDir = { x: 1, y: 0 };
+    /** Speed of the stroke at fire time — used as reference magnitude for spin impulse */
+    this._strokeSpeed = 0;
     /** True when a spin effect should be applied on the next physics update */
     this._spinEffectQueued = false;
 
@@ -392,10 +394,13 @@ export class PhysicsEngine {
     this.cushionContactAfterBallHit = false;
     this._spinEffectQueued = false;
     const speed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2);
-    // Store normalised stroke direction for spin effect calculations
+    // Store normalised stroke direction AND initial speed for spin effect calculations.
+    // We use _strokeSpeed (not post-collision speed) so draw/follow work correctly
+    // even on head-on shots where the cue ball transfers all velocity to the object ball.
     this._strokeDir = speed > 0
       ? { x: velocity.x / speed, y: velocity.y / speed }
       : { x: 1, y: 0 };
+    this._strokeSpeed = speed;
     console.log(`[PHYSICS] Cue stroke applied: vx=${velocity.x.toFixed(2)} vy=${velocity.y.toFixed(2)} speed=${speed.toFixed(2)} spin=(${this.cueBallSpin.x.toFixed(2)},${this.cueBallSpin.y.toFixed(2)})`);
     // Overrides any residual velocities and guarantees 100% directional accuracy
     Matter.Body.setVelocity(this.cueBall, velocity);
@@ -412,34 +417,41 @@ export class PhysicsEngine {
     const spin = this.cueBallSpin;
     if (Math.abs(spin.x) < 0.05 && Math.abs(spin.y) < 0.05) return;
 
-    const vel   = this.cueBall.velocity;
-    const speed = Math.sqrt(vel.x ** 2 + vel.y ** 2);
-    if (speed < 0.1) return; // Ball already stopped, nothing to modify
+    const vel = this.cueBall.velocity;
+    const dir = this._strokeDir;      // Normalised stroke direction stored at fire-time
+    // CRITICAL: use _strokeSpeed (initial shot speed), NOT post-collision cue ball speed.
+    // On a head-on shot the cue ball stops dead (speed ≈ 0 after contact), so multiplying
+    // by post-collision speed gives a near-zero impulse and the effect is invisible.
+    // Using the original stroke speed gives a physically meaningful impulse every time.
+    const refSpeed = this._strokeSpeed;
+    if (refSpeed < 0.5) return; // Stroke too weak to bother
 
-    const dir = this._strokeDir; // Normalised stroke direction stored at fire-time
     let newVx = vel.x;
     let newVy = vel.y;
 
-    // Draw / Follow — modifies velocity along the original stroke direction
-    // spin.y > 0 (below centre, draw): subtract forward component → ball reverses
-    // spin.y < 0 (above centre, follow): add forward component → ball continues
+    // Draw / Follow — impulse along the original stroke direction
+    //   spin.y > 0 → contact point below centre (draw/backspin)
+    //     Subtract forward component: cue ball reverses or slows
+    //   spin.y < 0 → contact point above centre (follow/topspin)
+    //     Add forward component: cue ball continues forward
     if (Math.abs(spin.y) > 0.05) {
       const drawStrength = 0.55;
-      newVx -= dir.x * spin.y * speed * drawStrength;
-      newVy -= dir.y * spin.y * speed * drawStrength;
+      newVx -= dir.x * spin.y * refSpeed * drawStrength;
+      newVy -= dir.y * spin.y * refSpeed * drawStrength;
     }
 
-    // Side spin / English — modifies velocity perpendicular to stroke direction
-    // Perpendicular to dir: (-dir.y, dir.x)
+    // Side spin / English — impulse perpendicular to stroke direction
+    //   spin.x > 0 → right English  |  spin.x < 0 → left English
+    //   Perpendicular to dir: (-dir.y, dir.x)
     if (Math.abs(spin.x) > 0.05) {
-      const sideStrength = 0.30;
+      const sideStrength = 0.25;
       const perpX = -dir.y;
       const perpY =  dir.x;
-      newVx += perpX * spin.x * speed * sideStrength;
-      newVy += perpY * spin.x * speed * sideStrength;
+      newVx += perpX * spin.x * refSpeed * sideStrength;
+      newVy += perpY * spin.x * refSpeed * sideStrength;
     }
 
-    console.log(`[SPIN] Effect applied: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)}) vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)})`);
+    console.log(`[SPIN] Effect applied: spin=(${spin.x.toFixed(2)},${spin.y.toFixed(2)}) refSpeed=${refSpeed.toFixed(2)} vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)}) → (${newVx.toFixed(2)},${newVy.toFixed(2)})`);
     Matter.Body.setVelocity(this.cueBall, { x: newVx, y: newVy });
 
     // Reset spin so it only fires once per shot
