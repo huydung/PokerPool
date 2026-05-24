@@ -866,10 +866,57 @@ export class CanvasRenderer {
 
     rp.addChild(toggleBtn);
 
-    // ── Store geometry for handleRightPanelClick() called from main.js ───
-    // The native DOM listener is NOT added here — it's added by main.js on
-    // renderer.app.canvas so it uses the proven-working canvas reference and
-    // fires in the same order as controls.js (both added post-init).
+    // ── FINISH SHOT button (cheat mode — hidden by default) ───────────────
+    // Lives in the right panel below the CHEAT toggle. Shown only when cheat
+    // mode is active AND a ball + pocket selection has been confirmed.
+    // 56px wide panel: compact two-line amber button centered on cx.
+    const finishY = toggleY + 68;  // 68px below the toggle pill centre
+
+    // Separator line above the FINISH button
+    const finishSep = new Graphics();
+    finishSep.moveTo(panelX + 6, finishY - 28).lineTo(this.config.canvas.width - 6, finishY - 28);
+    finishSep.stroke({ color: 0x1e3a5f, width: 1 });
+    rp.addChild(finishSep);
+
+    const finishContainer = new Container();
+    finishContainer.x = cx;
+    finishContainer.y = finishY;
+    finishContainer.visible = false;           // hidden until cheat mode needs it
+    this._cheatFinishPanelBtn = finishContainer;
+    this._rpFinishY = finishY;
+
+    const finishBg = new Graphics();
+    const fw = 44, fh = 36;
+    finishBg.roundRect(-fw / 2, -fh / 2, fw, fh, 8);
+    finishBg.fill({ color: 0xff8f00 });
+    finishBg.stroke({ color: 0xffc107, width: 1.5 });
+    finishContainer.addChild(finishBg);
+    this._cheatFinishPanelBg = finishBg;
+
+    const finishIcon = new Text({
+      text: '⚡',
+      style: new TextStyle({ fontFamily: 'Inter, Arial, sans-serif', fontSize: 13, fill: 0x1a0a00 })
+    });
+    finishIcon.anchor.set(0.5);
+    finishIcon.x = 0;
+    finishIcon.y = -9;
+    finishContainer.addChild(finishIcon);
+
+    const finishLbl = new Text({
+      text: 'FINISH',
+      style: new TextStyle({
+        fontFamily: 'Inter, Arial, sans-serif', fontSize: 8,
+        fontWeight: '900', fill: 0x1a0a00, letterSpacing: 0.5
+      })
+    });
+    finishLbl.anchor.set(0.5);
+    finishLbl.x = 0;
+    finishLbl.y = 7;
+    finishContainer.addChild(finishLbl);
+
+    rp.addChild(finishContainer);
+
+    // ── Store geometry for handleRightPanelClick() called from controls.js ──
     this._rpPanelX  = panelX;
     this._rpCx      = cx;
     this._rpYTop    = yTop;
@@ -877,7 +924,7 @@ export class CanvasRenderer {
     this._rpQCirc   = qCirc;
     this._rpICirc   = iCirc;
 
-    console.log(`[RENDERER] Right panel drawn: panelX=${panelX} cx=${cx} yTop=${yTop} toggleY=${toggleY}`);
+    console.log(`[RENDERER] Right panel drawn: panelX=${panelX} cx=${cx} yTop=${yTop} toggleY=${toggleY} finishY=${finishY}`);
   }
 
   /**
@@ -951,7 +998,19 @@ export class CanvasRenderer {
       return;
     }
 
-    console.log(`[RENDERER] Right panel click at y=${y.toFixed(0)} — no button matched (toggleY=${toggleY} yTop=${yTop})`);
+    // FINISH SHOT button (visible only when cheat selection is ready)
+    const finishY = this._rpFinishY;
+    if (finishY && this._cheatFinishPanelBtn?.visible && Math.abs(y - finishY) <= 22) {
+      console.log('[RENDERER] FINISH SHOT button hit (right panel)');
+      if (this._cheatFinishPanelBg) {
+        this._cheatFinishPanelBg.tint = 0xdddddd;
+        setTimeout(() => { if (this._cheatFinishPanelBg) this._cheatFinishPanelBg.tint = 0xffffff; }, 150);
+      }
+      if (this.onCheatFinishShot) this.onCheatFinishShot();
+      return;
+    }
+
+    console.log(`[RENDERER] Right panel click at y=${y.toFixed(0)} — no button matched (toggleY=${toggleY} finishY=${finishY} yTop=${yTop})`);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -959,56 +1018,21 @@ export class CanvasRenderer {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Shows or hides the amber "FINISH SHOT" button in the HUD strip.
-   * Positioned in the same slot as the BIH confirm button (y=78) but uses
-   * amber styling so players immediately recognise it as a cheat action.
+   * Shows or hides the amber "FINISH SHOT" button in the right panel.
+   * The button is pre-built in drawRightPanel() and simply toggled visible.
+   * It sits below the CHEAT toggle pill and is hit-tested via handleRightPanelClick.
    */
   setCheatFinishButton(visible) {
-    if (!visible) {
-      if (this._cheatFinishBtn) {
-        this.uiContainer.removeChild(this._cheatFinishBtn);
-        this._cheatFinishBtn.destroy({ children: true });
-        this._cheatFinishBtn = null;
-      }
-      return;
+    console.log(`[CHEAT] setCheatFinishButton(${visible}) panelBtn=${!!this._cheatFinishPanelBtn}`);
+    if (this._cheatFinishPanelBtn) {
+      this._cheatFinishPanelBtn.visible = visible;
     }
-    if (this._cheatFinishBtn) return; // already shown
-
-    const btn = new Container();
-    btn.eventMode = 'static';
-    btn.cursor = 'pointer';
-    btn.x = this.config.canvas.width / 2;
-    btn.y = 78;
-
-    const bg = new Graphics();
-    const w = 200, h = 20;
-    bg.roundRect(-w / 2, -h / 2, w, h, h / 2);
-    bg.fill({ color: 0xff8f00, alpha: 0.95 });
-    bg.stroke({ color: 0xffc107, width: 1.5, alpha: 0.9 });
-    btn.addChild(bg);
-
-    const lbl = new Text({
-      text: '⚡ FINISH SHOT',
-      style: new TextStyle({
-        fontFamily: 'Inter, Arial, sans-serif',
-        fontSize: 11,
-        fontWeight: '900',
-        fill: 0x1a0a00,
-        letterSpacing: 1.5
-      })
-    });
-    lbl.anchor.set(0.5);
-    btn.addChild(lbl);
-
-    btn.on('pointerover', () => { btn.alpha = 0.8; });
-    btn.on('pointerout',  () => { btn.alpha = 1.0; });
-    btn.on('pointerdown', (e) => {
-      e.stopPropagation();
-      if (this.onCheatFinishShot) this.onCheatFinishShot();
-    });
-
-    this._cheatFinishBtn = btn;
-    this.uiContainer.addChild(btn);
+    // Remove any legacy floating HUD button if it somehow still exists
+    if (this._cheatFinishBtn) {
+      this.uiContainer.removeChild(this._cheatFinishBtn);
+      this._cheatFinishBtn.destroy({ children: true });
+      this._cheatFinishBtn = null;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────

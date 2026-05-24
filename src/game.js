@@ -400,6 +400,9 @@ export class GameEngine {
 
     // ── NORMAL BALL PROCESSING ───────────────────────────────────────────────
 
+    // Capture endgame state BEFORE processing so we can detect if a dialog sets it
+    const endGameFlagBefore = this._opponentFinalTurn;
+
     // Phase 1: For each pocketed ball, prompt for suit mapping / wildcard selection
     // and collect all new cards. No hand dialog yet.
     const { cardsToAdd, ballActions, invalidReasons, anyValid } =
@@ -468,6 +471,20 @@ export class GameEngine {
 
     const scorer = this.activePlayer;
     this._resolveTurn(anyValid, invalidReasons, opponent);
+
+    // ── Endgame turn-force ─────────────────────────────────────────────────
+    // _showHandCompleteDialog may have set _opponentFinalTurn = true during Phase 2.
+    // _resolveTurn can override the active player (e.g. keeping turn on a score),
+    // so we re-force the switch to the opponent here.
+    if (!endGameFlagBefore && this._opponentFinalTurn && !this.gameEnded) {
+      this.activePlayer = opponent;
+      console.log(`[ENDGAME] Forcing turn to ${opponent} for their final shot`);
+      this.showShotToast(
+        `⏰ ${this._endGameFirstRequester} requests End Game — ${opponent} gets one final turn!`,
+        'score', 4000
+      );
+      if (this.renderer) this.renderer.setActivePlayer(this.activePlayer);
+    }
 
     if (this.renderer) this.renderer.updateHUD(this.hands, this.activePlayer, this.discardTokens);
 
@@ -891,10 +908,29 @@ export class GameEngine {
       overlay.className = 'discard-choice-overlay';
       container.appendChild(overlay);
 
-      // Determine if this is actually the opponent's final turn
+      // Is this the opponent's designated final turn (after the other player called End)?
       const isFinalTurn = this._opponentFinalTurn && player === this.activePlayer;
-      const endBtnLabel = isFinalTurn ? '⚔ End Game Now' : '⚔ Request End Game';
-      const continueLabel = isFinalTurn ? '🎱 Take My Last Shot' : '🎱 Continue Playing';
+      const opponent = player === this.player1Name ? this.player2Name : this.player1Name;
+
+      const bodyText = isFinalTurn
+        ? `⏰ <strong style="color:#ff9800">${this._endGameFirstRequester}</strong> called End Game — this is your final turn.<br>
+           Showdown happens after this shot regardless.`
+        : `You have a full hand. <strong style="color:#ff6b6b">Request End Game</strong> — your opponent gets one final turn, then showdown.
+           Or <strong style="color:#4fc3f7">Continue Playing</strong> to improve your hand
+           ${tokens > 0 ? `(${tokens} swap${tokens !== 1 ? 's' : ''} left)` : '— <span style="color:#ff9800">no swaps left</span>'}.`;
+
+      // Final-turn: only one button (showdown is inevitable).
+      // Normal: two buttons — Request End Game / Continue Playing.
+      const actionsHtml = isFinalTurn
+        ? `<button class="discard-btn-token" id="hc-end"
+             style="background:linear-gradient(135deg,#b71c1c,#7f0000);border-color:#c62828;width:100%">
+             ⚔ Go to Showdown
+           </button>`
+        : `<button class="discard-btn-token" id="hc-end"
+             style="background:linear-gradient(135deg,#b71c1c,#7f0000);border-color:#c62828">
+             ⚔ Request End Game
+           </button>
+           <button class="discard-btn-add" id="hc-continue">🎱 Continue Playing</button>`;
 
       overlay.innerHTML = `
         <div class="discard-choice-card" style="border-color:${accentColor}60;max-width:420px">
@@ -904,15 +940,9 @@ export class GameEngine {
           </div>
           <div class="discard-picker-grid" style="justify-content:center;margin-bottom:14px">${cardsHtml}</div>
           <div style="color:#8ab4d4;font-size:11px;text-align:center;line-height:1.5;margin-bottom:16px;padding:0 8px;">
-            You have a full hand. You can <strong style="color:#ff6b6b">Request End Game</strong> — your opponent gets
-            one final turn to build their hand, then it's showdown. Or <strong style="color:#4fc3f7">Continue Playing</strong>
-            to improve your hand${tokens>0?` (${tokens} replacement chance${tokens!==1?'s':''} left)`:''}.<br>
-            ${tokens===0?'<span style="color:#ff9800">⚠ No replacements left — you can still play but cannot swap cards</span>':''}
+            ${bodyText}
           </div>
-          <div class="discard-actions" style="gap:10px">
-            <button class="discard-btn-token" id="hc-end" style="background:linear-gradient(135deg,#b71c1c,#7f0000);border-color:#c62828">${endBtnLabel}</button>
-            <button class="discard-btn-add" id="hc-continue">${continueLabel}</button>
-          </div>
+          <div class="discard-actions" style="gap:10px">${actionsHtml}</div>
         </div>`;
 
       const close = () => {
@@ -924,33 +954,27 @@ export class GameEngine {
         }, 250);
       };
 
-      overlay.querySelector('#hc-end').addEventListener('click', async () => {
+      overlay.querySelector('#hc-end').addEventListener('click', () => {
+        console.log(`[ENDGAME] ${player} clicked → ${isFinalTurn ? 'Go to Showdown' : 'Request End Game'}`);
         close();
-        await Promise.resolve(); // let the overlay close before continuing
-        const opponent = player === this.player1Name ? this.player2Name : this.player1Name;
-        if (this._opponentFinalTurn) {
-          // Opponent was already given their final turn and also clicked Request End → showdown
-          console.log(`[ENDGAME] ${player} also requests end → immediate showdown`);
+        if (isFinalTurn) {
+          // Opponent also wants to end (or just acknowledging their final turn) → immediate showdown
           this.triggerShowdown();
         } else {
-          console.log(`[ENDGAME] ${player} requests end → giving ${opponent} one final turn`);
+          // First request — give opponent one final turn (turn-force handled after _resolveTurn)
           this._endGameFirstRequester = player;
           this._opponentFinalTurn = true;
-          this.showShotToast(`⚔ ${player} requests end game — ${opponent} gets one final turn!`, 'score', 4000);
+          // Toast + active-player update done by the endgame turn-force block after _resolveTurn
         }
       });
 
-      overlay.querySelector('#hc-continue').addEventListener('click', () => {
-        console.log(`[ENDGAME] ${player} continues playing`);
-        // If opponent had given their final turn and this player chose to continue,
-        // reset the final-turn flag so the flow doesn't cascade into a showdown
-        if (this._opponentFinalTurn && player !== this._endGameFirstRequester) {
-          this._opponentFinalTurn = false;
-          this._endGameFirstRequester = null;
-          console.log(`[ENDGAME] Opponent's final turn skipped — resetting endgame flags`);
-        }
-        close();
-      });
+      const continueBtn = overlay.querySelector('#hc-continue');
+      if (continueBtn) {
+        continueBtn.addEventListener('click', () => {
+          console.log(`[ENDGAME] ${player} chose → Continue Playing`);
+          close();
+        });
+      }
     });
   }
 
