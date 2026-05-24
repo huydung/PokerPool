@@ -888,9 +888,9 @@ export class GameEngine {
       const accentColor = isP1 ? '#00e5ff' : '#e040fb';
       const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
 
-      // Evaluate the hand ranking
-      const handResult = hand.length === 5 ? evaluatePokerHand(hand) : null;
-      const rankingName = handResult?.name || 'Unknown Hand';
+      // Evaluate the hand ranking (supports 1–5 cards)
+      const handResult = hand.length > 0 ? evaluatePokerHand(hand) : null;
+      const rankingName = handResult?.label || 'Unknown Hand';
 
       const cardsHtml = hand.map(c => {
         const r = rankLabels[c.rank] || String(c.rank);
@@ -1299,7 +1299,7 @@ export class GameEngine {
 
   _invalidReasonText(reason) {
     switch (reason) {
-      case 'duplicate':             return 'Card already held by either player';
+      case 'duplicate':             return 'Card already held in players\' hands';
       case 'wildcard_wrong_pocket': return '★ Wildcard must be played into a Wild ★ Pocket';
       case 'rank_in_wild':          return 'Numbered ball cannot score in a Wild ★ Pocket';
       default:                      return 'Invalid drop';

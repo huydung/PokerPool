@@ -1535,27 +1535,11 @@ export class CanvasRenderer {
    * @returns {string} Label string or empty string
    */
   _getPartialHandLabel(hand) {
-    if (!hand || hand.length < 2) return '';
-    if (hand.length === 5) {
-      const ev = evaluatePokerHand(hand);
-      return ev.label;
-    }
-    // Partial hand: detect pairs, two pair, and flush potential
-    const counts = {};
-    hand.forEach(c => { counts[c.rank] = (counts[c.rank] || 0) + 1; });
-    const vals = Object.values(counts).sort((a, b) => b - a);
-    const isFlushDraw = hand.every(c => c.suit === hand[0].suit);
-    if (vals[0] === 4) return 'Four of a Kind (in progress)';
-    if (vals[0] === 3 && vals[1] === 2) return 'Full House (in progress)';
-    if (vals[0] === 3) return 'Three of a Kind (in progress)';
-    if (vals[0] === 2 && vals[1] === 2) return 'Two Pair (in progress)';
-    if (vals[0] === 2) {
-      const rankNames = { 1: 'Aces', 11: 'Jacks', 12: 'Queens', 13: 'Kings' };
-      const pairRank = Object.entries(counts).find(([, v]) => v === 2)?.[0];
-      return `Pair of ${rankNames[pairRank] || (pairRank + 's')}`;
-    }
-    if (isFlushDraw) return 'Flush Draw';
-    return 'High Card';
+    if (!hand || hand.length === 0) return '';
+    // evaluatePokerHand now supports 1–5 cards natively
+    const ev = evaluatePokerHand(hand);
+    // Append "(in progress)" for hands under 5 cards to signal they're still building
+    return hand.length < 5 ? `${ev.label} (in progress)` : ev.label;
   }
 
 
