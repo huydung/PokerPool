@@ -4,6 +4,13 @@ import { CanvasRenderer } from './renderer.js';
 import { AimingControls } from './controls.js';
 import { CONFIG } from './config.js';
 import { GameEngine } from './game.js';
+import { AIPlayer } from './ai.js';
+
+// ── AI mode detection ─────────────────────────────────────────────────────────
+// Append ?ai to the URL to play against the AI, e.g. http://localhost:5173/?ai
+const urlParams = new URLSearchParams(window.location.search);
+const AI_MODE = urlParams.has('ai') || urlParams.get('mode') === 'ai';
+console.log(`[MAIN] Mode: ${AI_MODE ? 'Player vs AI' : 'Player vs Player'}`);
 
 /**
  * Orchestrates and coordinates the Poker Pool physics sandbox
@@ -21,6 +28,15 @@ async function initSandbox() {
 
   // 1b. Create the central game rules orchestrator
   const game = new GameEngine(CONFIG);
+
+  // 1c. Create AI player if in AI mode
+  let aiPlayer = null;
+  if (AI_MODE) {
+    aiPlayer = new AIPlayer(CONFIG, game.player2Name);
+    // Tell game.js which player name is AI so dialogs auto-resolve for it
+    game._aiPlayerName = aiPlayer.playerName;
+    console.log(`[MAIN] AI player created: ${aiPlayer.playerName}`);
+  }
 
   // 2. Initialize the Pixi.js Canvas Renderer
   const renderer = new CanvasRenderer(container, CONFIG);
@@ -90,6 +106,37 @@ async function initSandbox() {
   controls.isBreakPlacement = true;
   controls.hasBallInHand = true;
 
+  // ── AI turn trigger ───────────────────────────────────────────────────────
+  // Called after handleShotEnd resolves (all dialogs dismissed, active player updated).
+  // Checks if it's the AI's turn and fires a shot after a short visual pause.
+  let aiTurnPending = false;
+
+  const maybeStartAITurn = () => {
+    if (!aiPlayer || game.gameEnded) return;
+    if (game.activePlayer !== aiPlayer.playerName) return;
+    if (aiTurnPending) return;
+
+    aiTurnPending = true;
+    console.log(`[MAIN] AI turn scheduled`);
+
+    // Brief delay so the player can see the table state before AI shoots
+    setTimeout(() => {
+      aiTurnPending = false;
+      if (game.activePlayer !== aiPlayer.playerName || game.gameEnded || isShotActive) return;
+      aiPlayer.takeTurn(physics, game, controls).catch(e => {
+        console.error('[MAIN] AI takeTurn error:', e);
+      });
+    }, 900);
+  };
+
+  // ── If AI won the coin toss, it breaks first ──────────────────────────────
+  if (aiPlayer && game.activePlayer === aiPlayer.playerName) {
+    console.log('[MAIN] AI won coin toss — scheduling break shot');
+    setTimeout(() => {
+      if (!game.gameEnded) maybeStartAITurn();
+    }, 1200);
+  }
+
   let isShotActive = false;
 
   // 5. Core Game Loop running inside Pixi ticker (synced to display refresh rate)
@@ -108,7 +155,9 @@ async function initSandbox() {
     renderer.syncCheatOverlays();
 
     // Step C: Calculate and render the aiming laser line & ghost ball
-    const aimData = controls.getAimData();
+    // Skip aim-line rendering when it's the AI's turn (no human aiming)
+    const isAITurn = aiPlayer && game.activePlayer === aiPlayer.playerName;
+    const aimData = isAITurn ? null : controls.getAimData();
     renderer.drawAimLine(aimData);
 
     // Step D: Render the power indicator slider (driven by slider drag)
@@ -128,7 +177,10 @@ async function initSandbox() {
       isShotActive = false;
       // Auto-aim toward the ball with the clearest path to a pocket after every shot
       controls.aimAtBestShot();
-      game.handleShotEnd(physics);
+      // handleShotEnd is async — chain the AI trigger onto its completion
+      game.handleShotEnd(physics).then(() => {
+        maybeStartAITurn();
+      });
     }
   });
 

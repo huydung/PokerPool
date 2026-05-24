@@ -127,6 +127,12 @@ export class GameEngine {
     // ── Shot validity bypass flag (cheat shots skip the validity check) ───────
     this._skipShotValidityCheck = false;
 
+    // ── AI mode ───────────────────────────────────────────────────────────────
+    /** Name of the AI-controlled player, or null for PvP. Set externally from main.js. */
+    this._aiPlayerName = null;
+    /** Hand rank (from evaluatePokerHand) at or above which AI requests end game */
+    this._aiEndGameThreshold = 5; // 5 = Straight; AI folds on weaker hands
+
     // ── Cheat mode ────────────────────────────────────────────────────────────
     this.cheatEnabled = false;
     /** Ordered list of physics bodies selected for cheat pocket simulation */
@@ -245,12 +251,30 @@ export class GameEngine {
     }
   }
 
+  /**
+   * Logs both players' hands to the console for easy reference.
+   * Called at shot start/end and after any hand change.
+   */
+  _logHands() {
+    const rankLabels = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+    const fmt = c => `${rankLabels[c.rank] || c.rank}${c.suit}`;
+    const p1h = this.hands[this.player1Name];
+    const p2h = this.hands[this.player2Name];
+    const p1eval = p1h.length > 0 ? (evaluatePokerHand(p1h)?.label || '?') : 'empty';
+    const p2eval = p2h.length > 0 ? (evaluatePokerHand(p2h)?.label || '?') : 'empty';
+    console.log(
+      `[HANDS] ${this.player1Name}(${p1h.length}/5): [${p1h.map(fmt).join(' ')}] ${p1eval}` +
+      `  |  ${this.player2Name}(${p2h.length}/5): [${p2h.map(fmt).join(' ')}] ${p2eval}`
+    );
+  }
+
   handleShotStart() {
     this.pocketedBallsThisShot = [];
     this.pocketedBallsDetails = [];
     this.cueBallScratchThisShot = false;
     this._shotInProgress = true;
     console.log(`[SHOT_START] Registers cleared — ${this.activePlayer}'s shot`);
+    this._logHands();
   }
 
   async handleShotEnd(physics) {
@@ -309,6 +333,8 @@ export class GameEngine {
       this.triggerShowdown();
       return;
     }
+
+    this._logHands();
 
     // ── Turn-start endgame prompt ─────────────────────────────────────────────
     // When the ACTIVE PLAYER CHANGED this shot resolution AND the incoming player
@@ -461,28 +487,40 @@ export class GameEngine {
         // ── Exactly 5 — auto-add ──────────────────────────────────────────────
         hand.push(...cardsToAdd);
         console.log(`[HAND] Reached 5 — hand complete`);
-        // Show hand-complete dialog only the FIRST time this player reaches 5 cards
-        if (!this._handCompleted[this.activePlayer]) {
-          this._handCompleted[this.activePlayer] = true;
-          await this._showHandCompleteDialog(this.activePlayer);
-        }
 
       } else {
-        // ── Overflow (already had 5 cards, or multi-ball gave >5) ─────────────
-        // Free swap dialog: player picks which card(s) to drop (no token cost).
+        // ── Overflow (projected > 5) — free swap dialog ───────────────────────
         console.log(`[HAND] Overflow (projected ${projectedSize}) — showing free swap dialog`);
         await this._showOverflowDiscardDialog(this.activePlayer, cardsToAdd);
         console.log(`[HAND] Overflow resolved — hand now ${hand.length} cards`);
-        // Show hand-complete dialog only the FIRST time they reach exactly 5
-        if (hand.length === 5 && !this._handCompleted[this.activePlayer]) {
-          this._handCompleted[this.activePlayer] = true;
-          await this._showHandCompleteDialog(this.activePlayer);
-        }
       }
 
       // Track who first completed a full 5-card hand (tiebreaker)
       if (hand.length === 5 && !this.firstToCompleteHand) {
         this.firstToCompleteHand = this.activePlayer;
+      }
+
+      this._logHands();
+
+      // ── Endgame choice at every hand-complete touch point ─────────────────
+      // Fires whenever a player's hand settles at 5 after any shot — not just
+      // the first time.  First time: full celebration dialog.  Subsequent card
+      // swaps: compact side-panel prompt so the player can decide right after
+      // seeing the new hand.  Skipped during opponent's designated final turn.
+      if (hand.length === 5 && !this.gameEnded && !this._opponentFinalTurn) {
+        if (!this._handCompleted[this.activePlayer]) {
+          this._handCompleted[this.activePlayer] = true;
+          await this._showHandCompleteDialog(this.activePlayer);
+        } else {
+          // Already had a full hand — card was swapped. Prompt again.
+          console.log(`[ENDGAME] ${this.activePlayer} hand at 5 after card swap — compact endgame prompt`);
+          const choice = await this._showTurnStartEndgamePrompt(this.activePlayer);
+          if (choice === 'end' && !this.gameEnded) {
+            this._endGameFirstRequester = this.activePlayer;
+            this._opponentFinalTurn = true;
+            console.log(`[ENDGAME] ${this.activePlayer} requests End Game post-swap → ${this.opponent} gets final turn`);
+          }
+        }
       }
     }
 
@@ -800,7 +838,32 @@ export class GameEngine {
    * @returns {Promise<void>}
    */
   _showOverflowDiscardDialog(player, newCards) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
+      // ── AI auto-discard: pick the card whose removal yields the best remaining hand ──
+      if (player === this._aiPlayerName) {
+        const hand = this.hands[player];
+        const combined = [
+          ...hand.map((c, i) => ({ ...c, uid: `old_${i}` })),
+          ...newCards.map((c, i) => ({ ...c, uid: `new_${i}` }))
+        ];
+        // Repeatedly discard the weakest card until hand size = 5
+        while (combined.length > 5) {
+          let bestScore = -1;
+          let discardIdx = 0;
+          for (let i = 0; i < combined.length; i++) {
+            const remaining = combined.filter((_, j) => j !== i).map(c => ({ rank: c.rank, suit: c.suit }));
+            const score = remaining.length <= 5 ? (evaluatePokerHand(remaining)?.rank ?? 0) : 0;
+            if (score > bestScore) { bestScore = score; discardIdx = i; }
+          }
+          const discarded = combined.splice(discardIdx, 1)[0];
+          console.log(`[AI] Auto-discard: dropped ${discarded.rank}${discarded.suit} — working hand ${combined.length}`);
+        }
+        hand.splice(0, hand.length, ...combined.map(c => ({ rank: c.rank, suit: c.suit })));
+        await new Promise(r => setTimeout(r, 400));
+        resolve();
+        return;
+      }
+
       if (this.controls) this.controls.enabled = false;
 
       const hand = this.hands[player];
@@ -895,7 +958,22 @@ export class GameEngine {
    * @returns {Promise<void>}
    */
   _showHandCompleteDialog(player) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
+      // ── AI auto-resolve: no dialog shown, AI decides silently ──────────────
+      if (player === this._aiPlayerName) {
+        const hand = this.hands[player] || [];
+        const handResult = hand.length > 0 ? evaluatePokerHand(hand) : null;
+        const shouldEnd = (handResult?.rank ?? 0) >= this._aiEndGameThreshold;
+        console.log(`[AI] Hand complete dialog auto: ${handResult?.label} rank=${handResult?.rank} → ${shouldEnd ? 'Request End Game' : 'Continue Playing'}`);
+        await new Promise(r => setTimeout(r, 700));
+        if (shouldEnd && !this.gameEnded) {
+          this._endGameFirstRequester = player;
+          this._opponentFinalTurn = true;
+        }
+        resolve();
+        return;
+      }
+
       if (this.controls) this.controls.enabled = false;
 
       const hand = this.hands[player] || [];
@@ -1004,7 +1082,18 @@ export class GameEngine {
    * @returns {Promise<'end'|'continue'>}
    */
   _showTurnStartEndgamePrompt(player) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
+      // ── AI auto-resolve ────────────────────────────────────────────────────
+      if (player === this._aiPlayerName) {
+        const hand = this.hands[player] || [];
+        const handResult = hand.length > 0 ? evaluatePokerHand(hand) : null;
+        const shouldEnd = (handResult?.rank ?? 0) >= this._aiEndGameThreshold;
+        console.log(`[AI] Turn-start prompt auto: ${handResult?.label} → ${shouldEnd ? 'end' : 'continue'}`);
+        await new Promise(r => setTimeout(r, 400));
+        resolve(shouldEnd ? 'end' : 'continue');
+        return;
+      }
+
       if (this.controls) this.controls.enabled = false;
 
       const hand = this.hands[player] || [];
@@ -1022,21 +1111,28 @@ export class GameEngine {
 
       const prompt = document.createElement('div');
       prompt.className = 'turn-start-endgame-prompt';
+
+      // ── Position under the player's own hand display ──────────────────────
+      // Alice (P1) → left side of canvas.  Bob (P2) → right side (avoid right panel at x≥968).
+      // Canvas is 1024×576; table top rail is at y≈130.
+      const positionCss = isP1
+        ? 'left: 5px; right: auto;'
+        : 'right: 62px; left: auto;';
+
       prompt.style.cssText = `
         position: absolute;
-        top: 95px;
-        left: 50%;
-        transform: translateX(-50%);
+        top: 125px;
+        ${positionCss}
         background: rgba(8, 15, 33, 0.96);
         border: 1.5px solid ${accentColor};
         border-radius: 12px;
-        padding: 10px 16px 10px;
+        padding: 10px 14px;
         display: flex;
         flex-direction: column;
         align-items: center;
         gap: 7px;
         z-index: 600;
-        min-width: 300px;
+        width: 215px;
         box-shadow: 0 0 24px ${accentColor}55, 0 4px 16px rgba(0,0,0,0.7);
         font-family: 'Inter', Arial, sans-serif;
         pointer-events: auto;
