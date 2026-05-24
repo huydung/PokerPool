@@ -21,8 +21,7 @@ export class AimingControls {
     // Interaction states
     this.isAiming = false;             // true while pointer is held for aim-rotation drag
     this.isDraggingSlider = false;     // true while pointer is dragging the power slider
-    this._dragStart = null;            // canvas-space anchor for the current aim drag
-    this._initialStrokeDir = null;     // strokeDir snapshot captured at drag start
+    this._prevOrbitalAngle = undefined; // angle (rad) from cue ball to pointer at last frame
     this._sliderDragStartY = 0;        // Y coordinate where slider drag began
     this._sliderDragStartPower = 0;    // powerRatio at the moment slider drag began
     this.currentMousePos = { x: 512, y: 338 }; // Centered default
@@ -342,11 +341,15 @@ export class AimingControls {
         return;
       }
 
-      // ── Aim rotation drag ───────────────────────────────────────────────────
-      this._dragStart = { x, y };
-      this._initialStrokeDir = { ...this.strokeDir };
+      // ── Aim rotation drag — orbital model ──────────────────────────────────
+      // Record the angle from the cue ball to the initial touch point.
+      // pointermove will compare subsequent angles against this to derive
+      // a CW/CCW delta that rotates strokeDir incrementally.
+      const cb = this.physics.cueBall.position;
+      this._prevOrbitalAngle = Math.atan2(y - cb.y, x - cb.x);
       this.isAiming = true;
       this.activePointerId = e.pointerId;
+      console.log(`[AIM] Drag start — orbital angle=${(this._prevOrbitalAngle * 180 / Math.PI).toFixed(1)}°`);
     });
 
     // ── POINTER MOVE ──────────────────────────────────────────────────────────
@@ -370,39 +373,43 @@ export class AimingControls {
         return;
       }
 
-      if (!this.isAiming || !this._dragStart || !this._initialStrokeDir) return;
+      if (!this.isAiming || this._prevOrbitalAngle === undefined) return;
 
-      // Aim rotation: dominant-axis world-space formula.
-      //
-      // Sign convention (screen coords, Y increases downward):
-      //   positive angle → clockwise rotation on screen
-      //   negative angle → counter-clockwise rotation on screen
-      //
-      // Desired behaviour (confirmed by user):
-      //   • Left→Right  (dx > 0)  → screen-CW   → angle = +dx * f  ✓
-      //   • Right→Left  (dx < 0)  → screen-CCW  → angle = +dx * f  ✓
-      //   • Bottom→Top  (dy < 0)  → screen-CCW  → angle = +dy * f  ✓  (dy already negative)
-      //   • Top→Bottom  (dy > 0)  → screen-CW   → angle = +dy * f  ✓
-      //
-      // For diagonal drags: only the dominant axis contributes so the rotation
-      // never mixes two axes and the gesture always feels intentional.
-      //
-      // Sensitivity: a full-table-width drag = 90° of rotation.
-      const dx = x - this._dragStart.x;
-      const dy = y - this._dragStart.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 2) return; // ignore micro-jitter
-      const ix = this._initialStrokeDir.x;
-      const iy = this._initialStrokeDir.y;
-      // Pick the dominant axis — whichever component has the larger absolute magnitude
-      const rotDelta = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
-      const angle = rotDelta * (Math.PI / 2) / this.config.table.width;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
+      // ── Orbital aim rotation ──────────────────────────────────────────────
+      // The cue ball is the pivot.  We measure the angle from the cue ball
+      // to the pointer each frame and rotate strokeDir by the per-frame delta.
+      // Dragging clockwise around the cue ball → aim rotates CW.
+      // Dragging counter-clockwise → aim rotates CCW.
+      // This is position-independent: it works consistently wherever the cue
+      // ball sits and regardless of which direction you start dragging.
+      const cb = this.physics.cueBall.position;
+      const tdx = x - cb.x;
+      const tdy = y - cb.y;
+      const distToCue = Math.sqrt(tdx * tdx + tdy * tdy);
+      // Ignore frames where the pointer is very close to the cue ball —
+      // tiny pixel movements near the centre create huge angle noise.
+      if (distToCue < 12) return;
+
+      const currentAngle = Math.atan2(tdy, tdx);
+      let delta = currentAngle - this._prevOrbitalAngle;
+
+      // Normalise delta to (−π, π] so crossing the ±π wrap never causes a
+      // sudden 360° flip.
+      if (delta >  Math.PI) delta -= 2 * Math.PI;
+      if (delta < -Math.PI) delta += 2 * Math.PI;
+
+      // Apply incremental rotation to strokeDir
+      const cos = Math.cos(delta);
+      const sin = Math.sin(delta);
+      const sx = this.strokeDir.x;
+      const sy = this.strokeDir.y;
       this.strokeDir = {
-        x: ix * cos - iy * sin,
-        y: ix * sin + iy * cos
+        x: sx * cos - sy * sin,
+        y: sx * sin + sy * cos
       };
+
+      // Advance the orbital angle for the next frame
+      this._prevOrbitalAngle = currentAngle;
     });
 
     // ── POINTER UP ────────────────────────────────────────────────────────────
@@ -418,8 +425,7 @@ export class AimingControls {
       // Aim drag release → lock direction, do NOT fire
       if (this.isAiming) {
         this.isAiming = false;
-        this._dragStart = null;
-        this._initialStrokeDir = null;
+        this._prevOrbitalAngle = undefined;
         return;
       }
 
