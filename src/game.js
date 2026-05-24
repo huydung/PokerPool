@@ -325,13 +325,24 @@ export class GameEngine {
     if (this.gameEnded) return;
 
     // ── Opponent final-turn check ─────────────────────────────────────────────
-    // If this shot was the opponent's single allowed final turn after a "Request End Game",
-    // trigger showdown now. The hand-complete dialog inside processNormalPocketedBalls
-    // will have already handled the "also Request End" case if they pocketed.
+    // A "final turn" means the opponent keeps shooting as long as they pocket a
+    // valid ball each shot (same bonus-shot rule as a normal turn).  Showdown only
+    // fires when their turn actually ENDS — i.e. they miss, foul, or scratch.
+    //
+    // Detection: if the active player is still the same person who fired this shot,
+    // _resolveTurn gave them a bonus shot → let them continue.
+    // If the active player changed, their turn ended → trigger showdown.
     if (wasOpponentFinalTurn && !this.gameEnded) {
-      console.log('[ENDGAME] Opponent final turn complete → triggering showdown');
-      this.triggerShowdown();
-      return;
+      const finalTurnPlayer = playerWhoJustShot;
+      if (this.activePlayer !== finalTurnPlayer) {
+        // Turn ended (miss / foul / scratch) → showdown
+        console.log(`[ENDGAME] ${finalTurnPlayer}'s final turn ended — triggering showdown`);
+        this.triggerShowdown();
+        return;
+      } else {
+        // Scored and kept turn → bonus shot continues within the final turn
+        console.log(`[ENDGAME] ${finalTurnPlayer} scored during final turn — bonus shot continues`);
+      }
     }
 
     this._logHands();
