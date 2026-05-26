@@ -19,7 +19,9 @@
       "WebFetch(domain:chipmunk-physics.net)",
       "Bash(npm install *)",
       "Bash(mkdir -p /Users/dung.nguyenhuy/Dev/PokerPoolGit/.claude)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(git -C /Users/dung.nguyenhuy/Dev/PokerPoolGit remote -v)",
+      "Bash(git -C /Users/dung.nguyenhuy/Dev/PokerPoolGit branch)"
     ]
   }
 }

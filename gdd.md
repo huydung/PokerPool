@@ -1,10 +1,15 @@
-# Poker Pool — Prototype Game Design Document (v1.1)
+# Poker Pool — Prototype Game Design Document (v1.2)
 
 This document distills the core mechanics of **Poker Pool** into an actionable, lightweight specification for a playable 1v1 local prototype. Visual polish, network code, and secondary features are omitted to focus purely on physics tuning, interaction loops, and gameplay strategy.
 
-## 1\. Executive Setup & Table Topography
+---
 
-The prototype is a 1v1 local pass-and-play game played on a standard 2:1 billiards table model with 6 pockets (4 corners, 2 center side pockets).
+## 1. Executive Setup & Table Topography
+
+The prototype is a 1v1 local **pass-and-play** game played on a standard 2:1 billiards table model with 6 pockets (4 corners, 2 center side pockets).
+
+### Player Names
+Both player names are entered on the start screen before the game begins. Placeholder defaults are "Player 1" and "Player 2". Names propagate consistently throughout the HUD, match-over dialog, and all toast messages — no player is ever referred to by a hardcoded name.
 
 ### The Rack & Asset Allocation
 
@@ -17,7 +22,9 @@ The prototype is a 1v1 local pass-and-play game played on a standard 2:1 billiar
 
 When a ball enters an invalid pocket, scratches, or drops during the break, it immediately teleports to one of 9 pre-set coordinates on the table surface (Zebra patterns across head, center, and foot zones). If a targeted spawn spot is blocked by an active ball, the engine cycles to the next index.
 
-## 2\. The Opening: Lag Shot & The Break
+---
+
+## 2. The Opening: Lag Shot & The Break
 
 ### The Simplified Lag
 
@@ -32,7 +39,9 @@ The break shot allows players to scatter the pack dynamically without gaining an
 3.  If at least one ball was pocketed on the break, the breaking player maintains their turn and takes the first true strategic shot. If no balls dropped, the turn passes cleanly to the opponent.
 4.  A cue ball scratch on the break resets all pocketed balls to respawn spots, increments the breaker's miss counter, and awards the opponent **Ball in Hand** anywhere on the surface.
 
-## 3\. Phase 1: Suit War (Pocket Mapping)
+---
+
+## 3. Phase 1: Suit War (Pocket Mapping)
 
 At the start of the match, all six pockets are entirely generic (gray rim rendering). The core early game revolves around map territory acquisition.
 
@@ -41,7 +50,9 @@ At the start of the match, all six pockets are entirely generic (gray rim render
 -   Once chosen, that suit is locked to that pocket for the duration of the match. A suit cannot be duplicated.
 -   **Phase Transition:** As soon as all four suits are mapped to four different pockets, the remaining two unmapped pockets instantly transform into **Wild Pockets** (rendered with a gold border and a "★" icon).
 
-## 4\. Phase 2: The Card Hand Race & Wildcards
+---
+
+## 4. Phase 2: The Card Hand Race & Wildcards
 
 ### Turn Mechanics & Chaining
 
@@ -73,7 +84,9 @@ When a ball drops into an active pocket, its programmatic identity is instantly 
 
 A player's hand maxes out at 5 cards. If a player scores a valid 6th card, a UI overlay freezes play, displaying all 6 options. The player must choose one card to permanently discard to return their active hand to exactly 5 cards.
 
-## 5\. The Endgame: Stand & Showdown
+---
+
+## 5. The Endgame: Stand & Showdown
 
 The match rushes to a conclusion via two distinct architectural pathways:
 
@@ -88,26 +101,42 @@ The match rushes to a conclusion via two distinct architectural pathways:
 
 If both players happen to fill their active hands to exactly 5 cards simultaneously during normal back-and-forth play, the engine skips the Stand mechanic entirely and forces an **immediate Showdown**.
 
-### Showdown Resolution (The tiebreaker)
+### Showdown Resolution (The Tiebreaker)
 
 Hands are evaluated using standard 5-card poker rankings (High Card up to Royal Flush) via an internal script.
 
 -   If both players hold identical hand rankings (e.g., both have a Pair of Kings), the engine evaluates their individual kicker cards.
 -   If the kickers are entirely identical, **the player who triggered the Stand mechanic (completed their hand architecture first) is awarded the win** as a reward for strategic pacing.
 
-## 6\. Prototype Asset & Tech Mapping (Kenney Framework)
+---
 
-To rapidly build this prototype without creating custom art assets, the code maps directly to free, lightweight engine modules and **Kenney's All-in-1 Asset Bundle**:
+## 6. Cheat Mode
 
--   **Engine & Physics Layer:** Matter.js for high-fidelity 2D rigid-body elastic ball-to-ball and rail collisions. Friction and angular velocity are tuned to simulate heavy pool balls.
--   **Rendering Layer:** Pixi.js for fast WebGL rendering. Balls are drawn as programmatic circles using hues from Kenney's _Board Game Pack_, with text strings rendered directly on top.
--   **Card UI Overlays:** Kenney's _Playing Cards Pack_ sprites are mapped to HTML/CSS DOM elements floating directly over the canvas web page for high-readability hand views.
--   **Icons & Markers:** Suit icons (♠♥♦♣) and selection indicators map directly to assets in Kenney's _Board Game Icons_ pack.
--   **Audio Engine:** Howler.js managing spatial sound triggers. Hard/soft collisions pull from Kenney's _Impact Sounds_, while menu, suit selection, and victory jingles pull directly from Kenney's _UI Audio_ and _Music Jingles_ sets.
+A developer/testing utility accessible during active gameplay via the right side panel.
+
+- **Activation:** Click the **CHEAT** toggle pill in the right panel to turn it ON or OFF.
+- **What it enables:** While cheat mode is ON, the player can manually simulate any ball being pocketed into any pocket without physically shooting. Click a ball to select it (a ring appears around it), then click a pocket to complete the simulated pocket event. A **"FINISH ⚡"** button appears to confirm and execute the cheat shot through the normal game state machine (card registration, suit assignment, turn logic, etc. all apply normally).
+- **Purpose:** Rapid playtesting of edge cases — hand swapping, wildcard dialogs, the endgame stand/showdown flow — without needing to play through a full match.
+- **Scope:** Player 1's turn only (the human player in any configuration). Cheat shots go through the same `executeCheatShot` path as normal shots and respect all rules (no free duplicate cards, no bypassing suit locks, etc.).
 
 ---
 
-## 7. Milestone 1 Physical Engine Implementations & Discoveries
+## 7. Prototype Tech Stack (Actual Implementation)
+
+| Layer | Technology | Notes |
+|---|---|---|
+| Physics | Matter.js | Rigid-body 2D, elastic ball collisions, cushion restitution patched post-construction |
+| Rendering | Pixi.js v8 (WebGL) | Programmatic ball drawing, suit SVG icons, PixiJS Text for HUD |
+| Game Logic | Vanilla JS (`game.js`) | State machine: turns, card hands, scoring, endgame |
+| Poker Evaluator | Vanilla JS (`poker.js`) | 5-card hand ranking + tiebreaker chain, tested via `test.html` |
+| Build Tool | Vite 8 | ES modules, fast HMR dev server, `npm run build` → `dist/` |
+| Test Runner | `test.html` | Browser-native, zero build step, 48 assertions across 6 suites |
+
+> **Note:** AI opponent code (`src/ai.js`) exists in the codebase but is **not exposed to players** in the current build. The start screen always starts a 2-player local pass-and-play session. The AI implementation can be re-enabled in a future build.
+
+---
+
+## 8. Milestone 1 Physical Engine Implementations & Discoveries
 
 During the initial deployment of the physics engine and aiming controls, several concrete layout configurations and technical workarounds were established:
 
@@ -126,14 +155,14 @@ To respect architectural boundaries where physics must remain ignorant of card h
 
 ---
 
-## 8. Implemented Design Decisions (Post-GDD v1.1 Addenda)
+## 9. Implemented Design Decisions (Post-GDD v1.1 Addenda)
 
 These decisions were made or clarified during active development and supersede or extend the baseline spec where conflicts exist.
 
-### 8.1 Scratch Rule (Clarified)
+### 9.1 Scratch Rule (Clarified)
 A cue ball scratch voids the **entire shot** — not just the cue ball pocket event. All co-pocketed target balls on the same shot respawn immediately, no cards are awarded, no suit mappings are made, and no wildcards are consumed. The scratch victim's consecutive miss counter increments, and their opponent receives Ball-in-Hand. This early-exit behaviour is enforced at the top of `processNormalPocketedBalls` before any card logic runs.
 
-### 8.2 Duplicate Card Rule (Clarified)
+### 9.2 Duplicate Card Rule (Clarified)
 No card (rank + suit combination) may exist in both players' hands simultaneously, at any point in the game. The duplicate check is enforced globally across **both** hands for:
 - Standard rank balls pocketed into mapped suit pockets
 - Standard rank balls pocketed into a previously unmapped pocket (during Phase 1 suit assignment)
@@ -141,17 +170,18 @@ No card (rank + suit combination) may exist in both players' hands simultaneousl
 
 The `promptWildcardSelection` dialog disables rank/suit combinations already held by either player, not just the active player. If a chosen card is already held globally, the ball respawns and the turn ends as a miss.
 
-### 8.3 Aiming Assist (Design Finalization)
+### 9.3 Aiming Assist (Design Finalization)
 After playtesting, deflection projection lines and pocket glow indicators were removed as they cluttered the visual space and guided players too prescriptively. The final aiming system renders:
 - A dashed laser line from the cue ball toward the target
 - A ghost cue ball outline at the predicted contact point
 - A glowing ring around the cue ball when aim is locked
+
 No pocket glow, no target ball deflection lines, no cue deflection lines.
 
-### 8.4 Ball-in-Hand Overlap Guard
+### 9.4 Ball-in-Hand Overlap Guard
 During the Ball-in-Hand placement phase, the cue ball cannot be placed at a position that overlaps or touches any other ball on the table. The placement UI validates the proposed position in real time. The Confirm button is disabled (red "⚠ OVERLAPPING BALL" label) while the position is invalid, preventing placement confirmation until a legal position is chosen.
 
-### 8.5 Shot Toast Notifications
+### 9.5 Shot Toast Notifications
 After every shot resolution, a 3-second overlay toast appears just below the HUD summarising the outcome. Five toast types exist:
 - **Score** (green): Valid card earned, bonus turn granted
 - **Scratch** (red): Cue ball pocketed, balls respawned, BIH awarded
@@ -159,11 +189,11 @@ After every shot resolution, a 3-second overlay toast appears just below the HUD
 - **Invalid drop** (amber): Duplicate card attempt, ball respawned, miss counted
 - **Mixed** (purple): Valid card scored but also an invalid drop — miss counter resets but turn ends
 
-### 8.6 HUD Active-Player Sweep Animation
+### 9.6 HUD Active-Player Sweep Animation
 When the active player changes, a full-width gradient bar sweeps across the HUD (100px top area) to signal the handoff visually. Direction encodes the player: sweeping left-to-right signals P2 becoming active (purple), sweeping right-to-left signals P1 becoming active (cyan). The animation fires only on genuine player switches, not on the initial coin-toss assignment.
 
-### 8.7 Rules Reference Modal
+### 9.7 Rules Reference Modal
 A persistent `?` button anchored to the top center of the HUD (above the centre badge, `z-index: 1002`) opens a full scrollable rules reference overlay at any time during a match. It covers: table layout, pocket mapping, card earning, break rules, Ball-in-Hand, Stand mechanic, DQ rules, and the full poker hand ranking ladder.
 
-### 8.8 Browser-Based Test Suite
+### 9.8 Browser-Based Test Suite
 A self-contained `test.html` file (zero external dependencies, no build step required) provides 48 automated tests across 6 suites covering the poker evaluator: hand type detection, kicker comparison, Ace-low wheel detection, cross-rank disambiguation, wildcard-style combinations, and the 5-card hand comparison tiebreaker chain. Open directly in a browser to run.
