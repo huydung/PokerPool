@@ -84,8 +84,8 @@ export class CanvasRenderer {
     this.onCheatFinishShot = null;
 
     // Active Player Turn Name tracking
-    this.player1Name = this.config.rules?.player1Name || 'Alice';
-    this.player2Name = this.config.rules?.player2Name || 'Bob';
+    this.player1Name = this.config.rules?.player1Name || 'Player 1';
+    this.player2Name = this.config.rules?.player2Name || 'Player 2';
     this.activePlayerName = this.player1Name;
   }
 
@@ -338,7 +338,7 @@ export class CanvasRenderer {
     p1Container.y = 8;
     this.p1HUDContainer = p1Container;
 
-    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'ALICE'}`, style: p1TitleStyle });
+    const p1Title = new Text({ text: `${this.config.rules?.player1Name?.toUpperCase() || 'PLAYER 1'}`, style: p1TitleStyle });
     p1Title.x = 0;
     p1Title.y = 0;
     p1Container.addChild(p1Title);
@@ -394,7 +394,7 @@ export class CanvasRenderer {
     p2Container.y = 8;
     this.p2HUDContainer = p2Container;
 
-    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'BOB'}`, style: p2TitleStyle });
+    const p2Title = new Text({ text: `${this.config.rules?.player2Name?.toUpperCase() || 'PLAYER 2'}`, style: p2TitleStyle });
     p2Title.x = 0;
     p2Title.y = 0;
     p2Container.addChild(p2Title);
@@ -1050,7 +1050,7 @@ export class CanvasRenderer {
         this._cheatToggleLabel.text = this._cheatEnabled ? 'ON' : 'OFF';
         this._cheatToggleLabel.style.fill = this._cheatEnabled ? 0x001a00 : 0x6b8cae;
       }
-      console.log(`[RENDERER] Cheat toggle → ${this._cheatEnabled ? 'ON' : 'OFF'} (onCheatToggle wired=${!!this.onCheatToggle})`);
+      console.log(`[RENDERER] Cheat toggle → ${this._cheatEnabled ? 'ON' : 'OFF'}`);
       if (this.onCheatToggle) {
         this.onCheatToggle(this._cheatEnabled);
       } else {

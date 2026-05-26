@@ -16,16 +16,25 @@ const AI_NAMES = [
 
 /**
  * Shows the start screen inside #game-container and returns a promise that
- * resolves with { mode, p1Name, p2Name }.
- * - mode === '2p'  → two human players
- * - mode === 'ai'  → player vs AI (p2Name is the generated AI name)
+ * resolves with { mode, p1Name, p2Name } (always 2-player mode).
  *
  * @param {HTMLElement} container
- * @returns {Promise<{mode: '2p'|'ai', p1Name: string, p2Name: string}>}
+ * @returns {Promise<{mode: '2p', p1Name: string, p2Name: string}>}
  */
 function showStartScreen(container) {
   return new Promise((resolve) => {
     console.log('[MAIN] Showing start screen');
+
+    const inputStyle = `
+      width: 100%; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #3a5a3a; background: #0e1e0e;
+      color: #9fff9f; font-size: 15px; outline: none;
+      box-sizing: border-box;
+    `;
+    const labelStyle = `
+      display: block; text-align: left; margin-bottom: 5px;
+      color: #5a9a5a; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+    `;
 
     // ── Build overlay ────────────────────────────────────────────────────────
     const overlay = document.createElement('div');
@@ -58,168 +67,64 @@ function showStartScreen(container) {
           Best poker hand wins the rack
         </p>
 
-        <!-- Mode buttons -->
-        <div id="ss-mode-select" style="display: flex; gap: 14px; justify-content: center; margin-bottom: 28px;">
-          <button id="ss-btn-2p" style="
-            flex: 1; padding: 14px 10px; border-radius: 10px; border: 2px solid #3a5a3a;
-            background: #1e3a1e; color: #7fff7f; font-size: 15px; font-weight: 700;
-            cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
-          ">👥 2 Players</button>
-          <button id="ss-btn-ai" style="
-            flex: 1; padding: 14px 10px; border-radius: 10px; border: 2px solid #3a5a3a;
-            background: #1e3a1e; color: #7fff7f; font-size: 15px; font-weight: 700;
-            cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px;
-          ">🤖 vs AI</button>
+        <!-- Player name fields -->
+        <div style="margin-bottom: 14px; text-align: left;">
+          <label style="${labelStyle}">Player 1 Name</label>
+          <input id="ss-p1" type="text" placeholder="Player 1" maxlength="20" style="${inputStyle}"/>
+        </div>
+        <div style="text-align: left;">
+          <label style="${labelStyle}">Player 2 Name</label>
+          <input id="ss-p2" type="text" placeholder="Player 2" maxlength="20" style="${inputStyle}"/>
         </div>
 
-        <!-- Name entry (hidden until mode selected) -->
-        <div id="ss-name-entry" style="display: none;">
-          <div id="ss-name-fields"></div>
-          <button id="ss-start-btn" style="
-            margin-top: 20px; width: 100%; padding: 13px;
-            border-radius: 10px; border: 2px solid #5aaa5a;
-            background: linear-gradient(180deg, #2a5a2a 0%, #1a3a1a 100%);
-            color: #9fff9f; font-size: 16px; font-weight: 700;
-            cursor: pointer; letter-spacing: 1px; text-transform: uppercase;
-            box-shadow: 0 0 16px rgba(90,200,90,0.25);
-            transition: all 0.2s;
-          ">🎱 Start Game</button>
-        </div>
+        <button id="ss-start-btn" style="
+          margin-top: 20px; width: 100%; padding: 13px;
+          border-radius: 10px; border: 2px solid #5aaa5a;
+          background: linear-gradient(180deg, #2a5a2a 0%, #1a3a1a 100%);
+          color: #9fff9f; font-size: 16px; font-weight: 700;
+          cursor: pointer; letter-spacing: 1px; text-transform: uppercase;
+          box-shadow: 0 0 16px rgba(90,200,90,0.25);
+          transition: all 0.2s;
+        ">🎱 Start Game</button>
       </div>
     `;
 
     container.appendChild(overlay);
 
-    // ── Hover effects ────────────────────────────────────────────────────────
-    const styleHover = (btn) => {
-      btn.addEventListener('mouseenter', () => {
-        btn.style.background = '#2a5a2a';
-        btn.style.borderColor = '#5aaa5a';
-        btn.style.boxShadow = '0 0 14px rgba(90,200,90,0.3)';
-      });
-      btn.addEventListener('mouseleave', () => {
-        if (!btn.classList.contains('ss-selected')) {
-          btn.style.background = '#1e3a1e';
-          btn.style.borderColor = '#3a5a3a';
-          btn.style.boxShadow = '';
-        }
-      });
-    };
+    // Focus P1 input on open
+    setTimeout(() => document.getElementById('ss-p1')?.focus(), 50);
 
-    const btn2p = document.getElementById('ss-btn-2p');
-    const btnAI = document.getElementById('ss-btn-ai');
-    const nameEntry = document.getElementById('ss-name-entry');
-    const nameFields = document.getElementById('ss-name-fields');
-    const startBtn  = document.getElementById('ss-start-btn');
-    styleHover(btn2p);
-    styleHover(btnAI);
-
-    const inputStyle = `
-      width: 100%; padding: 10px 12px; border-radius: 8px;
-      border: 1px solid #3a5a3a; background: #0e1e0e;
-      color: #9fff9f; font-size: 15px; outline: none;
-      box-sizing: border-box;
-    `;
-    const labelStyle = `
-      display: block; text-align: left; margin-bottom: 5px;
-      color: #5a9a5a; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
-    `;
-
-    // ── Select 2-player mode ─────────────────────────────────────────────────
-    let selectedMode = null;
-
-    const selectMode = (mode) => {
-      selectedMode = mode;
-      // Highlight selected button
-      [btn2p, btnAI].forEach(b => {
-        b.classList.remove('ss-selected');
-        b.style.background = '#1e3a1e';
-        b.style.borderColor = '#3a5a3a';
-        b.style.boxShadow = '';
-      });
-      const activeBtn = mode === '2p' ? btn2p : btnAI;
-      activeBtn.classList.add('ss-selected');
-      activeBtn.style.background = '#2a5a2a';
-      activeBtn.style.borderColor = '#7fff7f';
-      activeBtn.style.boxShadow = '0 0 14px rgba(127,255,127,0.4)';
-
-      // Build name fields
-      if (mode === '2p') {
-        nameFields.innerHTML = `
-          <div style="margin-bottom: 14px;">
-            <label style="${labelStyle}">Player 1 Name</label>
-            <input id="ss-p1" type="text" placeholder="Alice" maxlength="20" style="${inputStyle}" value="Alice"/>
-          </div>
-          <div>
-            <label style="${labelStyle}">Player 2 Name</label>
-            <input id="ss-p2" type="text" placeholder="Bob" maxlength="20" style="${inputStyle}" value="Bob"/>
-          </div>
-        `;
-      } else {
-        const aiName = AI_NAMES[Math.floor(Math.random() * AI_NAMES.length)];
-        nameFields.innerHTML = `
-          <div style="margin-bottom: 14px;">
-            <label style="${labelStyle}">Your Name</label>
-            <input id="ss-p1" type="text" placeholder="Alice" maxlength="20" style="${inputStyle}" value="Alice"/>
-          </div>
-          <div style="
-            padding: 10px 12px; border-radius: 8px;
-            border: 1px solid #3a5a3a; background: #0e1e0e;
-            color: #5a9a5a; font-size: 14px; text-align: left;
-          ">
-            🤖 You'll face <strong style="color:#9fff9f">${aiName}</strong>
-            <input id="ss-ai-name" type="hidden" value="${aiName}"/>
-          </div>
-        `;
-      }
-
-      nameEntry.style.display = 'block';
-
-      // Focus first input
-      const firstInput = document.getElementById('ss-p1');
-      if (firstInput) {
-        setTimeout(() => firstInput.focus(), 50);
-        firstInput.select();
-      }
-
-      console.log(`[MAIN] Mode selected: ${mode}`);
-    };
-
-    btn2p.addEventListener('click', () => selectMode('2p'));
-    btnAI.addEventListener('click', () => selectMode('ai'));
+    // Hover effect on start button
+    const startBtn = document.getElementById('ss-start-btn');
+    startBtn.addEventListener('mouseenter', () => {
+      startBtn.style.background = 'linear-gradient(180deg, #3a7a3a 0%, #2a5a2a 100%)';
+      startBtn.style.boxShadow = '0 0 22px rgba(90,200,90,0.45)';
+    });
+    startBtn.addEventListener('mouseleave', () => {
+      startBtn.style.background = 'linear-gradient(180deg, #2a5a2a 0%, #1a3a1a 100%)';
+      startBtn.style.boxShadow = '0 0 16px rgba(90,200,90,0.25)';
+    });
 
     // ── Start game ───────────────────────────────────────────────────────────
     const doStart = () => {
-      if (!selectedMode) return;
+      const p1Name = (document.getElementById('ss-p1')?.value.trim()) || 'Player 1';
+      const p2Name = (document.getElementById('ss-p2')?.value.trim()) || 'Player 2';
 
-      const p1Input = document.getElementById('ss-p1');
-      const p1Name = (p1Input?.value.trim()) || 'Alice';
+      console.log(`[MAIN] Starting game — 2P | P1: "${p1Name}" | P2: "${p2Name}"`);
 
-      let p2Name;
-      if (selectedMode === '2p') {
-        const p2Input = document.getElementById('ss-p2');
-        p2Name = (p2Input?.value.trim()) || 'Bob';
-      } else {
-        const aiNameInput = document.getElementById('ss-ai-name');
-        p2Name = aiNameInput?.value || AI_NAMES[0];
-      }
-
-      console.log(`[MAIN] Starting game — mode: ${selectedMode}, P1: "${p1Name}", P2: "${p2Name}"`);
-
-      // Fade out and resolve
       overlay.style.transition = 'opacity 0.4s ease';
       overlay.style.opacity = '0';
       setTimeout(() => {
         overlay.remove();
-        resolve({ mode: selectedMode, p1Name, p2Name });
+        resolve({ mode: '2p', p1Name, p2Name });
       }, 420);
     };
 
     startBtn.addEventListener('click', doStart);
 
-    // Allow Enter key in inputs to start
+    // Enter key starts the game
     overlay.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && selectedMode) doStart();
+      if (e.key === 'Enter') doStart();
     });
   });
 }

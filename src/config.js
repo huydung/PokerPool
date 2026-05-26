@@ -193,9 +193,9 @@ export const CONFIG = {
 
   rules: {
     /** @type {string} Name of Player 1 */
-    player1Name: 'Alice',
+    player1Name: 'Player 1',
     /** @type {string} Name of Player 2 */
-    player2Name: 'Bob',
+    player2Name: 'Player 2',
     /** @type {number} Maximum number of cards in hand */
     handLimit: 5,
     /** @type {number} Discard tokens each player starts with (spend to discard a card after pocketing) */

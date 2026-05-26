@@ -21,17 +21,17 @@ import { CONFIG } from './config.js';
 export class AIPlayer {
   /**
    * @param {Object}  config      Centralized CONFIG object
-   * @param {string}  playerName  Must match game.player2Name (default 'Bob')
+   * @param {string}  playerName  Must match game.player2Name (default 'Player 2')
    */
   constructor(config = CONFIG, playerName = null) {
     this.config     = config;
-    this.playerName = playerName ?? config.rules?.player2Name ?? 'Bob';
+    this.playerName = playerName ?? config.rules?.player2Name ?? 'Player 2';
 
     // ── Difficulty tuning ────────────────────────────────────────────────────
-    this.aimErrorDegrees = 3.5;   // Gaussian σ for aiming error in degrees
-    this.powerVariance   = 0.10;  // ±fraction random power multiplier
+    this.aimErrorDegrees = 0.8;   // Gaussian σ for aiming error in degrees
+    this.powerVariance   = 0.05;  // ±fraction random power multiplier
     this.thinkTimeMs     = 600;   // base think delay (randomised ±200ms)
-    this.safetyPlayChance = 0.05; // 5% chance to intentionally play safe
+    this.safetyPlayChance = 0.0;  // always try to pocket a ball
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -203,9 +203,9 @@ export class AIPlayer {
 
     // Power: scale with shot distance, add variance
     const maxSpeed  = this.config.ball.maxSpeed;
-    const basePower = Math.min(0.75, 0.30 + dist / 500);
+    const basePower = Math.min(0.85, 0.45 + dist / 500);
     const variance  = (Math.random() - 0.5) * 2 * this.powerVariance;
-    const power     = Math.max(0.15, Math.min(1.0, basePower * (1 + variance)));
+    const power     = Math.max(0.35, Math.min(1.0, basePower * (1 + variance)));
     const speed     = power * maxSpeed;
 
     console.log(`[AI] Firing: ball=${shot.ball.plugin?.ballId} pocket=${shot.pocket.plugin?.pocketId} dist=${dist.toFixed(0)} power=${power.toFixed(2)} error=${(errorRad * 180 / Math.PI).toFixed(1)}°`);

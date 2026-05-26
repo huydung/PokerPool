@@ -60,8 +60,8 @@ export class GameEngine {
   constructor(config = CONFIG) {
     this.config = config;
 
-    this.player1Name = this.config.rules?.player1Name || 'Alice';
-    this.player2Name = this.config.rules?.player2Name || 'Bob';
+    this.player1Name = this.config.rules?.player1Name || 'Player 1';
+    this.player2Name = this.config.rules?.player2Name || 'Player 2';
 
     // Game state
     this.activePlayer = this.player1Name;
@@ -1854,8 +1854,8 @@ export class GameEngine {
 
     const details = `
       <div style="margin-top:15px;border-top:1px solid rgba(255,255,255,0.15);padding-top:15px;text-align:left;font-family:monospace;font-size:12px;color:#a0aab8;">
-        <div style="margin-bottom:8px;"><strong style="color:#00e5ff;">Alice's Hand:</strong> ${getHandStr(handA)}<br><span style="color:#64b5f6;">(${result.labelA})</span></div>
-        <div style="margin-bottom:8px;"><strong style="color:#e040fb;">Bob's Hand:</strong> ${getHandStr(handB)}<br><span style="color:#ba68c8;">(${result.labelB})</span></div>
+        <div style="margin-bottom:8px;"><strong style="color:#00e5ff;">${this.player1Name}'s Hand:</strong> ${getHandStr(handA)}<br><span style="color:#64b5f6;">(${result.labelA})</span></div>
+        <div style="margin-bottom:8px;"><strong style="color:#e040fb;">${this.player2Name}'s Hand:</strong> ${getHandStr(handB)}<br><span style="color:#ba68c8;">(${result.labelB})</span></div>
         <div style="margin-top:10px;border-top:1px dashed rgba(255,255,255,0.1);padding-top:8px;color:#ffd700;font-weight:bold;text-align:center;">${result.reason}</div>
       </div>
     `;

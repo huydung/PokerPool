@@ -16,7 +16,10 @@
       "WebFetch(domain:gist.github.com)",
       "WebFetch(domain:github.com)",
       "Bash(gh api *)",
-      "WebFetch(domain:chipmunk-physics.net)"
+      "WebFetch(domain:chipmunk-physics.net)",
+      "Bash(npm install *)",
+      "Bash(mkdir -p /Users/dung.nguyenhuy/Dev/PokerPoolGit/.claude)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

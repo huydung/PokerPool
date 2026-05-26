@@ -160,7 +160,7 @@ export function evaluatePokerHand(cards) {
 export function compareHands(
   handA, handB,
   standingPlayer, firstToStand, firstToCompleteHand,
-  player1Name = 'Alice', player2Name = 'Bob'
+  player1Name = 'Player 1', player2Name = 'Player 2'
 ) {
   const evalA = evaluatePokerHand(handA);
   const evalB = evaluatePokerHand(handB);
