@@ -1784,6 +1784,11 @@ export class GameEngine {
     const container = document.getElementById('game-container') || document.body;
     if (document.querySelector('.rules-modal-overlay')) return;
 
+    const r = (color, text) => `<span style="color:${color}">${text}</span>`;
+    const R = t => r('#ef9a9a', t); // red suit symbol
+    const B = t => r('#90caf9', t); // blue/white suit symbol
+    const ex = cards => `<span style="font-family:monospace;font-size:9.5px;color:#78909c;margin-left:4px">${cards}</span>`;
+
     const overlay = document.createElement('div');
     overlay.className = 'rules-modal-overlay';
     overlay.innerHTML = `
@@ -1791,42 +1796,78 @@ export class GameEngine {
         <h2 class="rules-modal-title">📖 How to Play</h2>
 
         <div class="rules-section-header">The Goal</div>
-        <div class="rules-row"><span class="rules-badge">🏆</span><span class="rules-text">Build the best <strong>5-card poker hand</strong> by pocketing pool balls. Each pocket is linked to a suit (♠ ♥ ♦ ♣). Pocket a ball → earn a card. Best hand at showdown wins.</span></div>
+        <div class="rules-row"><span class="rules-badge">🏆</span><span class="rules-text">Build the best <strong>5-card poker hand</strong> by pocketing pool balls. Each pocket links to a card suit (♠ ♥ ♦ ♣). Pocket a ball → earn a card. <strong>Best hand at Showdown wins.</strong></span></div>
 
         <div class="rules-section-header">Break Shot</div>
-        <div class="rules-row"><span class="rules-badge">🎱</span><span class="rules-text">The coin-toss winner places the cue ball <strong>anywhere in the kitchen</strong> (left of the head string) and breaks. Any balls pocketed on the break respawn — no cards or suits are claimed. ${this.config.rules.minBreakCushionContacts ?? 4} cushion contacts required if no ball drops, or it's a foul.</span></div>
+        <div class="rules-row"><span class="rules-badge">🎱</span><span class="rules-text">Coin-toss winner places the cue ball in the <strong>kitchen</strong> (left of head string) and breaks. All pocketed balls respawn — no cards or suits claimed. Needs <strong>${this.config.rules.minBreakCushionContacts ?? 4} cushion contacts</strong> if no ball drops, or it's a foul → Ball-in-Hand.</span></div>
 
-        <div class="rules-section-header">Pocket Suits</div>
-        <div class="rules-row"><span class="rules-badge">6</span><span class="rules-text">6 pockets — 4 corners + 2 sides. The first ball pocketed into an unclaimed pocket <strong>auto-assigns a random suit</strong> to that pocket. Once 4 suits are mapped, the remaining 2 become <strong>Wild ★ Pockets</strong>.</span></div>
+        <div class="rules-section-header">Claiming Pocket Suits</div>
+        <div class="rules-row"><span class="rules-badge">♣</span><span class="rules-text">6 pockets — 4 corners + 2 sides. Pocket a rank ball into an unclaimed pocket and you <strong>choose which suit (♠ ♥ ♦ ♣) to assign</strong> to it. Once all 4 suits are mapped, the last 2 pockets become <strong>Wild ★ Pockets</strong>.</span></div>
 
         <div class="rules-section-header">Earning Cards</div>
-        <div class="rules-row"><span class="rules-badge">✅</span><span class="rules-text"><strong>Pocket a ball into a valid suit pocket</strong> → earn that card. You may keep shooting until you miss (bonus turn).</span></div>
-        <div class="rules-row"><span class="rules-badge">🎫</span><span class="rules-text"><strong>Discard Tokens (${this.config.rules.discardTokens ?? 3} each):</strong> Every time you pocket a ball, you can spend a token to discard any card (the new one OR any existing card in your hand). Use them wisely — they let you shape your hand throughout the game.</span></div>
-        <div class="rules-row"><span class="rules-badge">5</span><span class="rules-text"><strong>Hand limit is 5 cards.</strong> With tokens remaining, use one to swap when you pocket a ball. Without tokens at 5 cards, you are <strong>Locked</strong>.</span></div>
+        <div class="rules-row"><span class="rules-badge">✅</span><span class="rules-text"><strong>Pocket a rank ball (1–13) into a suit pocket</strong> → a hand dialog appears. Press <strong>Keep</strong> to add the card to your hand. Pocket more valid balls to keep your bonus turn.</span></div>
+        <div class="rules-row"><span class="rules-badge">5</span><span class="rules-text"><strong>Hand limit: 5 cards.</strong> If you pocket a ball when your hand is full, you must <strong>Discard</strong> one card (free) to make room — the hand dialog lets you choose.</span></div>
+        <div class="rules-row"><span class="rules-badge">🚫</span><span class="rules-text">The same rank+suit can't exist in both hands. Invalid drops (wrong pocket type) respawn the ball and end your turn.</span></div>
 
-        <div class="rules-section-header">Locked State & Endgame</div>
-        <div class="rules-row"><span class="rules-badge">🔒</span><span class="rules-text"><strong>Locked</strong> = 5 cards + 0 tokens. You still shoot every turn but all pocketed balls immediately respawn — use it to disrupt the table for your opponent.</span></div>
-        <div class="rules-row"><span class="rules-badge">⏳</span><span class="rules-text">When a player locks, the opponent gets <strong>${this.config.rules.lockCountdownTurns ?? 3} more turns</strong> to optimize their hand. The opponent can also click <strong>Accept Showdown</strong> to end early.</span></div>
-        <div class="rules-row"><span class="rules-badge">⚔</span><span class="rules-text">When both players are locked, or the countdown hits 0, it's <strong>Showdown</strong> — best poker hand wins!</span></div>
+        <div class="rules-section-header">Wildcard Balls ★</div>
+        <div class="rules-row"><span class="rules-badge">★</span><span class="rules-text">Balls <strong>14★</strong> and <strong>15★</strong> are wildcards. Pocket a wildcard into a <strong>Wild ★ Pocket</strong> → choose <em>any rank + any suit</em> to add exactly the card you need. The wildcard ball is then <strong>permanently removed</strong> from the table.</span></div>
+        <div class="rules-row"><span class="rules-badge">⚠</span><span class="rules-text">Wildcards in a Suit Pocket, or rank balls in a Wild Pocket, are <strong>invalid</strong> — ball respawns, turn ends.</span></div>
 
-        <div class="rules-section-header">Scratch / Ball-in-Hand</div>
-        <div class="rules-row"><span class="rules-badge">👋</span><span class="rules-text">Cue ball pocketed → scratch. All co-pocketed balls respawn, no cards awarded. Opponent gets <strong>Ball-in-Hand</strong> anywhere on the table.</span></div>
+        <div class="rules-section-header">Shot Rules</div>
+        <div class="rules-row"><span class="rules-badge">⚠</span><span class="rules-text">Every shot must <strong>(1)</strong> contact at least one ball, and <strong>(2)</strong> drive a ball to a cushion or pocket after contact. Fail either → invalid shot, Ball-in-Hand for opponent.</span></div>
+        <div class="rules-row"><span class="rules-badge">👋</span><span class="rules-text"><strong>Scratch</strong> (cue ball pocketed): all co-pocketed balls respawn, no cards awarded, opponent gets <strong>Ball-in-Hand</strong> anywhere.</span></div>
 
-        <div class="rules-section-header">Poker Hand Rankings</div>
-        <div class="rules-hand-grid">
-          <div class="rules-hand-item"><span class="rules-hand-rank">10</span><span class="rules-hand-label">Royal Flush</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">9</span><span class="rules-hand-label">Straight Flush</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">8</span><span class="rules-hand-label">Four of a Kind</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">7</span><span class="rules-hand-label">Full House</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">6</span><span class="rules-hand-label">Flush</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">5</span><span class="rules-hand-label">Straight</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">4</span><span class="rules-hand-label">Three of a Kind</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">3</span><span class="rules-hand-label">Two Pair</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">2</span><span class="rules-hand-label">One Pair</span></div>
-          <div class="rules-hand-item"><span class="rules-hand-rank">1</span><span class="rules-hand-label">High Card</span></div>
+        <div class="rules-section-header">Endgame</div>
+        <div class="rules-row"><span class="rules-badge">5★</span><span class="rules-text">First time your hand reaches <strong>5 cards</strong>, a dialog shows your hand rank and two choices:</span></div>
+        <div class="rules-row"><span class="rules-badge">⚔</span><span class="rules-text"><strong>Request End Game</strong> → opponent gets <strong>one final turn</strong> (bonus shots still apply if they keep scoring). When their turn ends → Showdown.</span></div>
+        <div class="rules-row"><span class="rules-badge">🎱</span><span class="rules-text"><strong>Continue Playing</strong> → keep shooting freely. Swap cards via free overflow discards. You'll be prompted again at the start of each turn.</span></div>
+        <div class="rules-row"><span class="rules-badge">⚡</span><span class="rules-text">If both players hold 5 cards at the same time → <strong>immediate Showdown</strong>.</span></div>
+
+        <div class="rules-section-header">Hand Rankings (Best → Worst)</div>
+        <div class="rules-hand-grid" style="grid-template-columns:1fr;gap:4px 0">
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">10</span>
+            <div><div class="rules-hand-label">Royal Flush</div>${ex(`A${B('♠')} K${B('♠')} Q${B('♠')} J${B('♠')} 10${B('♠')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">9</span>
+            <div><div class="rules-hand-label">Straight Flush</div>${ex(`5${R('♥')} 6${R('♥')} 7${R('♥')} 8${R('♥')} 9${R('♥')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">8</span>
+            <div><div class="rules-hand-label">Four of a Kind</div>${ex(`7${B('♠')} 7${R('♦')} 7${B('♣')} 7${R('♥')} K${B('♠')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">7</span>
+            <div><div class="rules-hand-label">Full House</div>${ex(`8${B('♠')} 8${R('♦')} 8${B('♣')} A${R('♥')} A${R('♦')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">6</span>
+            <div><div class="rules-hand-label">Flush</div>${ex(`2${B('♠')} 5${B('♠')} 7${B('♠')} J${B('♠')} K${B('♠')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">5</span>
+            <div><div class="rules-hand-label">Straight</div>${ex(`5${B('♠')} 6${R('♦')} 7${B('♣')} 8${R('♥')} 9${B('♠')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">4</span>
+            <div><div class="rules-hand-label">Three of a Kind</div>${ex(`9${B('♠')} 9${R('♦')} 9${B('♣')} K${R('♥')} 4${B('♠')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">3</span>
+            <div><div class="rules-hand-label">Two Pair</div>${ex(`Q${B('♠')} Q${R('♥')} J${B('♣')} J${R('♦')} 3${B('♠')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">2</span>
+            <div><div class="rules-hand-label">One Pair</div>${ex(`K${B('♣')} K${R('♦')} 9${B('♠')} 5${R('♥')} 2${B('♣')}`)}</div>
+          </div>
+          <div class="rules-hand-item">
+            <span class="rules-hand-rank">1</span>
+            <div><div class="rules-hand-label">High Card</div>${ex(`A${B('♠')} J${R('♦')} 8${B('♣')} 5${R('♥')} 2${B('♠')}`)}</div>
+          </div>
         </div>
-        <div class="rules-row" style="margin-top:8px;"><span class="rules-badge">A</span><span class="rules-text">Ace plays <strong>high or low</strong>.</span></div>
-        <div class="rules-row"><span class="rules-badge">≡</span><span class="rules-text">Ties broken by kickers, then by who completed their hand first.</span></div>
+        <div class="rules-row" style="margin-top:10px;"><span class="rules-badge">A</span><span class="rules-text">Ace plays <strong>high or low</strong> (A-2-3-4-5 is a valid straight).</span></div>
+        <div class="rules-row"><span class="rules-badge">≡</span><span class="rules-text">Ties broken by kickers, then by who completed their 5-card hand first.</span></div>
 
         <button class="rules-close-btn" id="rules-close-btn">GOT IT — CLOSE</button>
       </div>
