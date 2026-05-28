@@ -776,9 +776,7 @@ export class GameEngine {
           </div>`;
         }).join('');
 
-        const discardLabel = freeDiscard
-          ? 'Discard (Free — multi-ball shot)'
-          : `Discard (${availableTokens} chance${availableTokens !== 1 ? 's' : ''} left)`;
+        const discardLabel = 'Discard';
 
         overlay.innerHTML = `
           <div class="discard-choice-card" style="border-color:${accentColor}40">
@@ -922,11 +920,11 @@ export class GameEngine {
           <div class="discard-choice-card" style="border-color:${accentColor}40">
             <div class="discard-choice-header" style="color:${accentColor}">${player.toUpperCase()} — ADJUST YOUR HAND</div>
             <div style="color:#ff9800;font-size:11px;text-align:center;margin-bottom:8px;">
-              Hand exceeds 5 — discard ${excess} card${excess!==1?'s':''} (free)
+              Hand exceeds 5 — discard ${excess} card${excess!==1?'s':''}
             </div>
             <div class="discard-picker-grid" id="hand-grid">${cardsHtml}</div>
             <div class="discard-actions">
-              <button class="discard-btn-token" id="dc-discard" ${canDiscard?'':'disabled'}>Discard Selected (Free)</button>
+              <button class="discard-btn-token" id="dc-discard" ${canDiscard?'':'disabled'}>Discard Selected</button>
             </div>
           </div>`;
 
@@ -1417,7 +1415,7 @@ export class GameEngine {
           <div class="discard-picker-grid" id="hand-grid">${cardsGrid}</div>
           <div class="discard-actions">
             <button class="discard-btn-add" id="dc-keep"${canKeep ? '' : ' disabled'}>Keep</button>
-            ${showDiscard ? `<button class="discard-btn-token" id="dc-discard" disabled>${isOverflow ? 'Discard (Free)' : `Discard (${tokens} chance${tokens !== 1 ? 's' : ''} left)`}</button>` : ''}
+            ${showDiscard ? `<button class="discard-btn-token" id="dc-discard" disabled>Discard</button>` : ''}
           </div>
         </div>
       `;
@@ -1482,7 +1480,7 @@ export class GameEngine {
       const handSize = (this.hands[this.activePlayer] || []).length;
       const tok = this.discardTokens[this.activePlayer] ?? 0;
       console.log(`[TURN] Clean score → ${this.activePlayer} keeps turn. hand=${handSize}/5 tokens=${tok}`);
-      this.showShotToast(`✅ Scored! ${this.activePlayer}: ${handSize}/5 cards, ${tok} token${tok !== 1 ? 's' : ''} left — bonus turn`, 'score');
+      this.showShotToast(`✅ Scored! ${this.activePlayer}: ${handSize}/5 cards — bonus turn`, 'score');
 
     } else if (anyValidScore && anyInvalidDrop) {
       console.log(`[TURN] Mixed → turn passes to ${opponent}`);
@@ -1806,7 +1804,7 @@ export class GameEngine {
 
         <div class="rules-section-header">Earning Cards</div>
         <div class="rules-row"><span class="rules-badge">✅</span><span class="rules-text"><strong>Pocket a rank ball (1–13) into a suit pocket</strong> → a hand dialog appears. Press <strong>Keep</strong> to add the card to your hand. Pocket more valid balls to keep your bonus turn.</span></div>
-        <div class="rules-row"><span class="rules-badge">5</span><span class="rules-text"><strong>Hand limit: 5 cards.</strong> If you pocket a ball when your hand is full, you must <strong>Discard</strong> one card (free) to make room — the hand dialog lets you choose.</span></div>
+        <div class="rules-row"><span class="rules-badge">5</span><span class="rules-text"><strong>Hand limit: 5 cards.</strong> If you pocket a ball when your hand is full, you must <strong>Discard</strong> one card to make room — the hand dialog lets you choose.</span></div>
         <div class="rules-row"><span class="rules-badge">🚫</span><span class="rules-text">The same rank+suit can't exist in both hands. Invalid drops (wrong pocket type) respawn the ball and end your turn.</span></div>
 
         <div class="rules-section-header">Wildcard Balls ★</div>
@@ -1820,7 +1818,7 @@ export class GameEngine {
         <div class="rules-section-header">Endgame</div>
         <div class="rules-row"><span class="rules-badge">5★</span><span class="rules-text">First time your hand reaches <strong>5 cards</strong>, a dialog shows your hand rank and two choices:</span></div>
         <div class="rules-row"><span class="rules-badge">⚔</span><span class="rules-text"><strong>Request End Game</strong> → opponent gets <strong>one final turn</strong> (bonus shots still apply if they keep scoring). When their turn ends → Showdown.</span></div>
-        <div class="rules-row"><span class="rules-badge">🎱</span><span class="rules-text"><strong>Continue Playing</strong> → keep shooting freely. Swap cards via free overflow discards. You'll be prompted again at the start of each turn.</span></div>
+        <div class="rules-row"><span class="rules-badge">🎱</span><span class="rules-text"><strong>Continue Playing</strong> → keep shooting freely. Swap cards via overflow discards. You'll be prompted again at the start of each turn.</span></div>
         <div class="rules-row"><span class="rules-badge">⚡</span><span class="rules-text">If both players hold 5 cards at the same time → <strong>immediate Showdown</strong>.</span></div>
 
         <div class="rules-section-header">Hand Rankings (Best → Worst)</div>

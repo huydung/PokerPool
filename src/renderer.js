@@ -49,8 +49,6 @@ export class CanvasRenderer {
     this.activePlayerText = null;
     this.p1HUDContainer = null;
     this.p2HUDContainer = null;
-    this.p1Tokens = [];
-    this.p2Tokens = [];
     // this.p1HandLabel = null;
     // this.p2HandLabel = null;
 
@@ -344,19 +342,6 @@ export class CanvasRenderer {
     p1Container.addChild(p1Title);
     this.p1TitleText = p1Title; // Save title reference
 
-    // Token chip indicators for P1 (poker chip look: outer fill + inner dark ring)
-    for (let i = 0; i < 3; i++) {
-      const dot = new Graphics();
-      dot.circle(0, 0, 6);
-      dot.fill({ color: 0x00e5ff });
-      dot.circle(0, 0, 3);
-      dot.fill({ color: 0x0a1527 });
-      dot.x = 142 + i * 17;
-      dot.y = 8;
-      p1Container.addChild(dot);
-      this.p1Tokens.push(dot);
-    }
-
     // Render 5 empty card slot outlines for Player 1
     for (let i = 0; i < 5; i++) {
       const cardSlot = new Graphics();
@@ -399,19 +384,6 @@ export class CanvasRenderer {
     p2Title.y = 0;
     p2Container.addChild(p2Title);
     this.p2TitleText = p2Title; // Save title reference
-
-    // Token chip indicators for P2 (poker chip look: outer fill + inner dark ring)
-    for (let i = 0; i < 3; i++) {
-      const dot = new Graphics();
-      dot.circle(0, 0, 6);
-      dot.fill({ color: 0xe040fb });
-      dot.circle(0, 0, 3);
-      dot.fill({ color: 0x0a1527 });
-      dot.x = 142 + i * 17;
-      dot.y = 8;
-      p2Container.addChild(dot);
-      this.p2Tokens.push(dot);
-    }
 
     // Render 5 empty card slot outlines for Player 2
     for (let i = 0; i < 5; i++) {
@@ -1757,10 +1729,6 @@ export class CanvasRenderer {
         this.renderCardOnHUD(this.p2CardsContainer, card, idx, 0xe040fb); // Purple border for P2 Bob
       });
     }
-
-    // 3. Discard tokens are removed from game rules — hide the dot indicators
-    this.p1Tokens.forEach(dot => { dot.visible = false; });
-    this.p2Tokens.forEach(dot => { dot.visible = false; })
 
     // 5. Update the turn text
     this.setActivePlayer(activePlayer);
