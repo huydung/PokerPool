@@ -738,17 +738,16 @@ export class CanvasRenderer {
   // ──────────────────────────────────────────────────────────────────────────
 
   /**
-   * Shows the "Confirm Position" button as a Pixi interactive element placed
-   * in the gap between the HUD and the table top.
-   * @param {string}   label      Button text (e.g. "CONFIRM BREAK POSITION")
-   * @param {Function} onConfirm  Callback fired when the button is pressed
+   * Shows the "Confirm Position" button as a visual Pixi element in the HUD strip.
+   * Click handling is done by controls.js via handleBIHConfirmClick() so it uses
+   * the same coordinate mapping as every other control (resize-proof).
+   * @param {string} label Button text (e.g. "CONFIRM BREAK POSITION")
    */
-  showBallInHandConfirmButton(label, onConfirm) {
+  showBallInHandConfirmButton(label) {
     this.hideBallInHandConfirmButton(); // remove any stale instance
 
     const btn = new Container();
-    btn.eventMode = 'static';
-    btn.cursor = 'pointer';
+    btn.eventMode = 'none'; // visual only — clicks handled in controls.js
 
     const bg = new Graphics();
     btn.addChild(bg);
@@ -767,12 +766,9 @@ export class CanvasRenderer {
     // Sits inside the HUD strip, centred below the active-player badge.
     // Badge occupies y=12→62; this button fills the remaining 62→85 band.
     btn.x = this.config.canvas.width / 2;
-    btn.y = 78; // centre of the 62–85 band ≈ 73.5, shifted down ~5px per UX feedback
+    btn.y = 78;
 
-    // Draws button in valid (green) or invalid (red) state and enables/disables interaction
-    let _isValid = true;
     const drawState = (valid) => {
-      _isValid = valid;
       bg.clear();
       const w = 230, h = 20;
       bg.roundRect(-w / 2, -h / 2, w, h, h / 2);
@@ -780,22 +776,26 @@ export class CanvasRenderer {
       bg.stroke({ color: valid ? 0x00e676 : 0xff5252, width: 1.5, alpha: 0.9 });
       text.text = valid ? label : '⚠ OVERLAPPING';
       text.style.fill = valid ? 0x001a00 : 0xffcccc;
-      btn.cursor = valid ? 'pointer' : 'not-allowed';
       btn.alpha = valid ? 1.0 : 0.75;
     };
     drawState(true);
     btn._drawState = drawState;
 
-    // Guard: only fire onConfirm when the position is actually valid.
-    // _isValid is kept in sync by drawState, which is called from updateBallInHandButton
-    // on every pointer-move, so it reflects the true current overlap state.
-    btn.on('pointerdown', (e) => {
-      e.stopPropagation();
-      if (_isValid) onConfirm();
-    });
-
     this._bihConfirmButton = btn;
     this.uiContainer.addChild(btn);
+  }
+
+  /**
+   * Returns true if game-space coordinates (x, y) land on the visible BIH confirm
+   * button. Called from controls.js so click routing uses getCanvasCoordinates(),
+   * the same path as every other control — unaffected by CSS/Pixi scaling drift.
+   */
+  handleBIHConfirmClick(x, y) {
+    if (!this._bihConfirmButton) return false;
+    const btnCX = this.config.canvas.width / 2; // 512
+    const btnCY = 78;
+    const halfW = 115, halfH = 14; // generous touch target
+    return Math.abs(x - btnCX) <= halfW && Math.abs(y - btnCY) <= halfH;
   }
 
   /**

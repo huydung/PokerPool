@@ -105,6 +105,19 @@ Player names are entered on the start screen (`showStartScreen` in `main.js`) an
 ### 3.7 Shot Feedback System
 Every shot resolution must emit a toast notification (see `GameEngine.showShotToast`) with one of five typed variants. The toast must fire **after** `this.activePlayer` has already been updated to the new active player, so the message correctly names who takes next turn. Toast duration is 3000 ms with CSS-driven entrance/exit animations; any new toast immediately replaces a still-visible previous one.
 
+### 3.9 UI Event Routing — Use `getCanvasCoordinates`, Never Pixi's Event System
+
+All interactive UI elements that the player can click **must** route their click detection through `AimingControls.getCanvasCoordinates()` in `controls.js`, not through Pixi's own event system (`btn.on('pointerdown', ...)`).
+
+**Why:** The canvas is CSS-scaled to fit any screen size. `getCanvasCoordinates()` applies a letterboxing correction that correctly maps viewport coordinates to game-space coordinates regardless of window size or aspect ratio. Pixi's internal `EventSystem.mapPositionToPoint()` uses the raw canvas bitmap dimensions and does not apply the same correction. After a window resize, the two systems produce different y-coordinates for the same click, causing Pixi-routed buttons to become unclickable even though they are visually correct.
+
+**The pattern to follow** (used by the right panel and BIH confirm button):
+1. Create the Pixi display object as **visual only**: `btn.eventMode = 'none'`. Do not attach any `pointerdown` listener to it.
+2. Add a hit-test method on `CanvasRenderer` (e.g. `handleBIHConfirmClick(x, y)`) that checks whether game-space coordinates land on the button's bounding box.
+3. In the `controls.js` `pointerdown` handler, after calling `getCanvasCoordinates()`, invoke the hit-test method and dispatch the action directly.
+
+**What NOT to do:** Do not use `btn.eventMode = 'static'` + `btn.on('pointerdown', callback)` for any button that must survive a window resize. Pixi event routing only works reliably when the canvas CSS dimensions exactly match Pixi's logical resolution (no letterboxing, no scaling).
+
 ### 3.8 AI Opponent (Hidden — Not Exposed)
 `src/ai.js` contains a complete ghost-ball geometry AI (`AIPlayer` class) capable of evaluating (ball, pocket) shot combinations and firing via `applyCueStroke`. It is **not wired into the current start screen** — the game always starts in 2-player pass-and-play mode. The AI code is preserved for future re-enablement. Any refactor must not delete `ai.js` or remove `import { AIPlayer }` from `main.js` until a deliberate decision is made to retire the feature.
 

@@ -139,9 +139,9 @@ export class AimingControls {
 
     const btnLabel = this.isBreakPlacement ? 'CONFIRM BREAK POSITION' : 'CONFIRM POSITION';
 
-    // Prefer the Pixi-native button (scales perfectly with canvas)
+    // Prefer the Pixi-native button (visual only — clicks routed via getCanvasCoordinates)
     if (this.renderer) {
-      this.renderer.showBallInHandConfirmButton(btnLabel, () => this.confirmCueBallPlacement());
+      this.renderer.showBallInHandConfirmButton(btnLabel);
       return;
     }
 
@@ -327,12 +327,18 @@ export class AimingControls {
 
       // ── Ball-in-Hand placement ──────────────────────────────────────────────
       if (this.hasBallInHand) {
-        if (x < this.config.table.xCenter - this.config.table.width / 2) return;
-        if (y > 100) {
-          this.isPlacingCueBall = true;
-          this.activePointerId = e.pointerId;
-          this._placeCueBallAt(x, y);
+        // HUD strip: only the confirm button lives here — route via getCanvasCoordinates
+        // (same path as every other control) so scaling works after any window resize.
+        if (y <= 100) {
+          if (this.renderer?.handleBIHConfirmClick(x, y)) {
+            this.confirmCueBallPlacement();
+          }
+          return;
         }
+        if (x < this.config.table.xCenter - this.config.table.width / 2) return;
+        this.isPlacingCueBall = true;
+        this.activePointerId = e.pointerId;
+        this._placeCueBallAt(x, y);
         return;
       }
 
